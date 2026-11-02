@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Add AdHush to your browser</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z' fill='%230f766e'/%3E%3Cpath d='m11 16 3.5 3.5L21.5 12' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body class="guide">
+  <main class="guide-main">
+    <div class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><path class="mark-bg" d="M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z"/><path class="mark-fg" d="m11 16 3.5 3.5L21.5 12"/></svg><span>AdHush</span></div>
+    <h1>Add AdHush Assistant to <span id="bname">your browser</span></h1>
+    <p class="sub">Keep this tab open and follow the steps. It takes about 20 seconds.</p>
+    <ol class="guide-steps">
+      <li>
+        <div class="name">Open the extensions page</div>
+        <div class="desc">Click the address bar, paste with <kbd>Ctrl</kbd>+<kbd>V</kbd> and press <kbd>Enter</kbd>. The address is already copied.</div>
+        <div class="row"><code id="page">chrome://extensions</code><button data-copy="page">Copy again</button></div>
+      </li>
+      <li>
+        <div class="name">Turn on <strong>Developer mode</strong></div>
+        <div class="desc" id="devhint">The switch is at the top right of the extensions page.</div>
+      </li>
+      <li>
+        <div class="name">Click <strong>Load unpacked</strong></div>
+        <div class="desc">Copy the folder path below, then in the window that opens paste it with <kbd>Ctrl</kbd>+<kbd>V</kbd> and click <strong>Select Folder</strong>.</div>
+        <div class="row"><code id="dir" class="path">…</code><button data-copy="dir" class="primary">Copy folder path</button></div>
+      </li>
+      <li>
+        <div class="name">Pin it</div>
+        <div class="desc">Click the puzzle-piece icon in the toolbar and pin <strong>AdHush Assistant</strong>. You can close this tab now.</div>
+      </li>
+    </ol>
+    <p class="hint">Why the manual steps? Browsers don't let programs add extensions by themselves, because that's how adware sneaks in.</p>
+  </main>
+  <div id="toasts" aria-live="polite"></div>
+  <script src="/extension-setup.js"></script>
+</body>
+</html>

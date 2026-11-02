@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path class="mark-bg" d="M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z"/><path class="mark-fg" d="m11 16 3.5 3.5L21.5 12"/></svg>
+    <span>AdHush</span>
+    <span id="state" class="pill">…</span>
+  </header>
+  <main id="main">
+    <div class="site">
+      <div><div id="host" class="host">—</div><div id="site-desc" class="desc">Filtering on this site</div></div>
+      <label class="switch"><input type="checkbox" id="site" aria-label="Filtering on this site"><span></span></label>
+    </div>
+    <div class="buttons">
+      <button id="pick">Block element</button>
+      <button id="pause">Pause 30 min</button>
+    </div>
+    <button id="broken" class="wide">Site not working? Turn AdHush off here</button>
+    <button id="open" class="link">Open AdHush</button>
+  </main>
+  <p id="err" class="err" hidden></p>
+  <script src="popup.js"></script>
+</body>
+</html>

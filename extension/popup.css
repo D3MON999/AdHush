@@ -1,0 +1,49 @@
+/* Same design tokens as the AdHush app (ui/app.css). */
+:root {
+  --bg: #ffffff; --panel-2: #eef3f3; --text: #0f172a; --muted: #475569; --line: #dbe3e5; --line-strong: #c3ced1;
+  --accent: #0f766e; --accent-hover: #115e59; --accent-ink: #fff; --accent-soft: #ccfbf1; --accent-soft-ink: #115e59;
+  --warn: #b45309; --warn-soft: #fef3c7; --off: #64748b; --danger: #dc2626;
+  --ease: cubic-bezier(.2, .7, .3, 1);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111b1e; --panel-2: #172428; --text: #e6eef0; --muted: #9db0b6; --line: #22343a; --line-strong: #31474e;
+    --accent: #2dd4bf; --accent-hover: #5eead4; --accent-ink: #042f2b; --accent-soft: #0f3b38; --accent-soft-ink: #99f6e4;
+    --warn: #fbbf24; --warn-soft: #3a2a08; --off: #8a9aa3; --danger: #f87171;
+    color-scheme: dark;
+  }
+}
+body { margin: 0; width: 310px; font: 14px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); }
+header { display: flex; align-items: center; gap: 9px; padding: 13px 16px; border-bottom: 1px solid var(--line); font-weight: 700; font-size: 15px; }
+header svg { width: 24px; height: 24px; }
+header svg .mark-bg { fill: var(--accent); }
+header svg .mark-fg { fill: none; stroke: var(--accent-ink); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.pill { margin-left: auto; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: var(--panel-2); color: var(--off); }
+.pill.on { background: var(--accent-soft); color: var(--accent-soft-ink); }
+.pill.paused { background: var(--warn-soft); color: var(--warn); }
+main { padding: 16px; }
+.site { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 12px 14px; background: var(--panel-2); border-radius: 12px; }
+.site > div { flex: 1; min-width: 0; }
+.host { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desc { color: var(--muted); font-size: 12.5px; }
+.buttons { display: flex; gap: 8px; }
+button { flex: 1; font: 500 13.5px/1.2 inherit; font-family: inherit; min-height: 36px; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line-strong); background: var(--bg); color: var(--text); cursor: pointer;
+  transition: background-color .18s var(--ease), border-color .18s var(--ease); }
+button:hover { background: var(--panel-2); border-color: var(--muted); }
+button:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.wide { display: block; width: 100%; margin-top: 8px; }
+button.link { display: block; width: 100%; margin-top: 10px; border: 0; background: transparent; color: var(--accent); font-weight: 600; }
+button.link:hover { background: var(--panel-2); }
+.err { margin: 0 16px 16px; color: var(--danger); font-size: 12.5px; }
+.switch { position: relative; width: 42px; height: 24px; flex-shrink: 0; }
+.switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; z-index: 1; }
+.switch span { position: absolute; inset: 0; border-radius: 24px; background: var(--line-strong); transition: background-color .2s var(--ease); }
+.switch span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / .25); transition: transform .2s var(--ease); }
+.switch input:checked + span { background: var(--accent); }
+.switch input:checked + span::after { transform: translateX(18px); }
+.switch input:focus-visible + span { outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
+.switch input:disabled { cursor: not-allowed; }
+.switch input:disabled + span { opacity: .45; }
+@media (prefers-reduced-motion: reduce) { * { transition-duration: 0s !important; } }

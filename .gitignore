@@ -1,0 +1,20 @@
+# Secrets: the update signing key must never be published (see scripts/release.mjs).
+keys/
+*.pem
+*.key
+*.pfx
+*.p12
+api-token
+
+# Local data and logs
+data/
+*.log
+
+# Build outputs (releases are uploaded to GitHub Releases, not committed)
+**/target/
+installer/stage/
+installer/output/
+node_modules/
+
+# Editor/assistant tooling
+.claude/

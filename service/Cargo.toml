@@ -1,0 +1,22 @@
+[package]
+name = "adhush-service"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+base64 = "0.22"
+ed25519-dalek = "2"
+serde_json = "1"
+sha2 = "0.10"
+ureq = "3.5.0"
+windows-service = "0.8"
+windows-sys = { version = "0.59", features = ["Win32_System_JobObjects", "Win32_Foundation", "Win32_System_Threading", "Win32_Security"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+
+[build-dependencies]
+embed-resource = "3.0.12"
