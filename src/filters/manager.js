@@ -75,7 +75,13 @@ export class FilterManager extends EventEmitter {
     }
     const byId = new Map(stored.map((f) => [f.id, f]));
     const builtins = CATALOG.map((c) => {
-      const s = byId.get(c.id) || {};
+      let s = byId.get(c.id) || {};
+      if (s.url && s.url !== c.url) {
+        // The catalog now points this list somewhere else (e.g. a smaller edition): drop the old
+        // download and its cache headers so the new source is fetched, but keep the on/off choice.
+        fs.rmSync(this.file(c.id), { force: true });
+        s = { enabled: s.enabled };
+      }
       const state = Object.fromEntries(STATE_FIELDS.filter((k) => k in s).map((k) => [k, s[k]]));
       return { ...c, custom: false, lastUpdate: 0, lastCheck: 0, rulesCount: 0, error: null, ...state };
     });

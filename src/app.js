@@ -21,6 +21,9 @@ import { Notifications } from './notifications.js';
 import { logger } from './log.js';
 
 const log = logger('app');
+// Lists switched on by default from 0.2 (catalog ids): HaGeZi Multi PRO, Windows trackers, TIF mini,
+// fake/scam, pop-up ads, AdGuard Base (web), cookie banners (web), uBlock annoyances (web).
+export const RECOMMENDED_V2 = [7, 20, 32, 33, 40, 103, 120, 122];
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Unpacked browser extension: <install dir>\extension next to app\, or <repo>\extension.
 const EXTENSION_DIR = [path.join(ROOT, '..', 'extension'), path.join(ROOT, 'extension')]
@@ -152,7 +155,10 @@ export class App {
     });
     this.schedulePauseEnd();
     // The tray polls notifications after start-up, so announce a fresh update a little later.
-    setTimeout(() => this.announceUpdate(), 20000).unref();
+    setTimeout(() => {
+      this.announceUpdate();
+      this.upgradeDefaults().catch((e) => log.error('upgrading defaults failed', e));
+    }, 20000).unref();
     await this.dns.start(this.listenAddresses());
     if (this.dns.errors.length) this.notifications.push('error', 'DNS filtering is not running', this.dns.errors.map((e) => e.message || String(e)).join('\n'));
     await this.api.start(this.overrides.apiPort);
@@ -193,6 +199,27 @@ export class App {
       state = JSON.parse(fs.readFileSync(path.join(this.dataDir, 'dns-state.json'), 'utf8'));
     } catch {}
     return { managed: this.settings.get().system.manageDns, guard: !!state, ...state };
+  }
+
+  // Brings installs from older releases up to the current recommended filter set, once.
+  // Only ever switches lists on; lists turned on by this release stay as the user leaves them.
+  async upgradeDefaults() {
+    const s = this.settings.get();
+    if (s.ui.defaultsVersion >= 2) return;
+    this.settings.update({ ui: { defaultsVersion: 2 } });
+    const added = [];
+    for (const id of RECOMMENDED_V2) {
+      const f = this.filters.get(id);
+      if (f && !f.enabled) {
+        await this.filters.setEnabled(id, true).catch((e) => log.warn(`enabling ${f.name} failed: ${e.message}`));
+        added.push(f.name);
+      }
+    }
+    log.info(`upgraded to recommended filter set v2: ${added.join(', ') || 'nothing to add'}`);
+    if (added.length) this.notifications.push('info', 'Stronger protection turned on', `AdHush 0.2 added ${added.length} recommended lists (malware feeds, pop-up ads, cookie banners and annoyances).`);
+    if (!this.settings.get().https.enabled) {
+      this.notifications.push('info', 'New: block YouTube ads', 'Open AdHush → Web filtering and click "Turn on" to also block ads inside web pages.');
+    }
   }
 
   // Written by the service's updater; absent when AdHush runs outside the service.

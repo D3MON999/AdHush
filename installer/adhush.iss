@@ -30,11 +30,13 @@ RestartApplications=no
 
 [Tasks]
 Name: dns; Description: "Block ads for the whole PC (point Windows DNS at AdHush)"; GroupDescription: "Protection:"
-Name: web; Description: "Advanced: also filter inside web pages, e.g. YouTube ads (installs a certificate unique to this PC; can break some sites)"; GroupDescription: "Protection:"; Flags: unchecked
+Name: web; Description: "Also block YouTube and in-page ads in your browsers (installs a certificate unique to this PC)"; GroupDescription: "Protection:"
 Name: autostart; Description: "Show the AdHush icon in the notification area at sign-in"; GroupDescription: "Other:"
 
 [Files]
 Source: "stage\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Run from {tmp} before files are replaced (PrepareToInstall).
+Source: "stop-windivert.ps1"; Flags: dontcopy
 
 [Icons]
 Name: "{group}\AdHush"; Filename: "{app}\adhush-tray.exe"
@@ -54,6 +56,8 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{commonappdata}\AdHush"
+; Anything created after install (driver leftovers, staged updates, logs) so nothing is left behind.
+Type: filesandordirs; Name: "{app}"
 Type: files; Name: "{app}\host\com.adhush.host.json"
 
 [Code]
@@ -83,6 +87,12 @@ begin
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM adhush-tray.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
   Exec(ExpandConstant('{sys}\net.exe'), 'stop AdHush', '', SW_HIDE, ewWaitUntilTerminated, Code);
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM adhush-core.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  // The WinDivert driver stays loaded after adhush-core exits and locks bin\WinDivert64.sys,
+  // which would make replacing it fail: unload AdHush's copy first (see stop-windivert.ps1).
+  ExtractTemporaryFile('stop-windivert.ps1');
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\stop-windivert.ps1') + '"',
+    '', SW_HIDE, ewWaitUntilTerminated, Code);
   Result := '';
 end;
 

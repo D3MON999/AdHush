@@ -9,12 +9,12 @@
   root.style.cssText = 'all:initial;position:fixed;inset:0;z-index:2147483647;pointer-events:none';
   const shadow = root.attachShadow({ mode: 'closed' });
   shadow.innerHTML = `<style>
-    .box { position: fixed; border: 2px solid #0f766e; background: rgba(15,118,110,.18); pointer-events: none; transition: all .05s; }
+    .box { position: fixed; border: 2px solid #10b981; background: rgba(16,185,129,.18); pointer-events: none; transition: all .05s; }
     .bar { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); pointer-events: auto; font: 13px/1.4 system-ui, "Segoe UI", sans-serif;
       background: #19201d; color: #e6ece9; border-radius: 10px; padding: 10px 12px; box-shadow: 0 6px 24px rgba(0,0,0,.35); display: flex; gap: 8px; align-items: center; max-width: 92vw; }
     input { flex: 1; min-width: 260px; font: 12px ui-monospace, Consolas, monospace; padding: 6px 8px; border-radius: 6px; border: 1px solid #2b3531; background: #111614; color: #e6ece9; }
     button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid #2b3531; background: transparent; color: inherit; cursor: pointer; }
-    button.go { background: #2dd4bf; color: #042f2b; border-color: #2dd4bf; font-weight: 600; }
+    button.go { background: #34d399; color: #042f2b; border-color: #34d399; font-weight: 600; }
     .n { color: #95a39c; white-space: nowrap; }
   </style><div class="box" hidden></div>
   <div class="bar"><span class="n">Click an element to block it</span><input hidden spellcheck="false"><button class="up" hidden title="Select parent">▲</button><button class="go" hidden>Block</button><button class="x">Cancel</button></div>`;

@@ -232,8 +232,8 @@ fn poller(dir: PathBuf, rx: mpsc::Receiver<Cmd>, proxy: EventLoopProxy<UserEvent
 fn shield_rgba(state: State) -> Vec<u8> {
     const N: usize = 32;
     let (r, g, b) = match state {
-        // Brand teal / amber / slate / red, matching the app's design tokens.
-        State::Active => (0x0f, 0x76, 0x6e),
+        // Brand emerald / amber / slate / red, matching the app's design tokens.
+        State::Active => (0x10, 0xb9, 0x81),
         State::Paused => (0xd9, 0x77, 0x06),
         State::Disabled => (0x64, 0x74, 0x8b),
         State::Offline => (0xdc, 0x26, 0x26),

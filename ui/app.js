@@ -2,15 +2,22 @@ const TOKEN = document.querySelector('meta[name="api-token"]').content;
 const view = document.getElementById('view');
 let timers = [];
 let currentRoute = null;
+// Bumped on every navigation. A page's API results that arrive after you have moved on are
+// dropped (the promise never settles), so a slow page can't draw over the one you opened.
+let navToken = 0;
+const NEVER = new Promise(() => {});
 
 // ---------- helpers ----------
-async function api(method, path, body) {
+// detached: for calls not tied to the current page (sidebar status, start-up).
+async function api(method, path, body, { detached = false } = {}) {
+  const token = navToken;
   const res = await fetch(path, {
     method,
     headers: { 'x-adhush-token': TOKEN, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
+  if (!detached && token !== navToken) return NEVER;
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }
@@ -58,14 +65,29 @@ function sw(id, checked, extra = '') {
 
 const SHIELD = '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z"/><path d="m11 16 3.5 3.5L21.5 12" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
+// Settings > Appearance. "auto" follows Windows: Sand when light, Midnight Mint when dark.
+const THEMES = [
+  { id: 'midnight', name: 'Midnight Mint', desc: 'Pure black with fresh mint', sw: ['#000000', '#141414', '#34d399'] },
+  { id: 'sand', name: 'Sand', desc: 'Warm light theme', sw: ['#f7f3ec', '#fffdf9', '#c2410c'] },
+  { id: 'ember', name: 'Graphite & Ember', desc: 'Graphite with bold orange', sw: ['#111111', '#222222', '#f97316'] },
+  { id: 'raspberry', name: 'Raspberry', desc: 'Deep red-rose', sw: ['#140a0c', '#27151a', '#f0364f'] },
+  { id: 'auto', name: 'Match Windows', desc: 'Sand in light mode, Midnight Mint in dark', sw: ['#f7f3ec', '#000000', '#34d399'] },
+];
+const LEGACY_THEMES = { light: 'sand', dark: 'midnight' };
+const systemDark = matchMedia('(prefers-color-scheme: dark)');
+let currentTheme = 'midnight';
+
 function applyTheme(theme) {
-  if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
-  else delete document.documentElement.dataset.theme;
+  currentTheme = LEGACY_THEMES[theme] || (THEMES.some((t) => t.id === theme) ? theme : 'midnight');
+  const id = currentTheme === 'auto' ? (systemDark.matches ? 'midnight' : 'sand') : currentTheme;
+  if (id === 'midnight') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = id;
 }
+systemDark.addEventListener('change', () => currentTheme === 'auto' && applyTheme('auto'));
 
 async function refreshSidebar() {
   try {
-    const s = await api('GET', '/api/status');
+    const s = await api('GET', '/api/status', undefined, { detached: true });
     const p = s.protection;
     const state = !p.enabled ? 'off' : !p.active ? 'paused' : 'on';
     const text = { off: 'Protection off', paused: `Paused until ${new Date(p.pausedUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, on: 'Protection on' }[state];
@@ -209,6 +231,40 @@ views.filters = async () => {
   await render();
 };
 
+// Apps known to break when their traffic is filtered: other filters/VPNs, anti-cheat, launchers, dev tools.
+const RISKY_APPS = [
+  ['Other ad blockers and VPNs', ['adguard.exe', 'adguardsvc.exe', 'adguardvpn.exe', 'adguardvpnsvc.exe', 'openvpn.exe', 'openvpn-gui.exe', 'wireguard.exe', 'nordvpn.exe', 'nordvpn-service.exe', 'protonvpn.exe', 'protonvpnservice.exe', 'expressvpn.exe', 'mullvad-daemon.exe']],
+  ['Games, launchers and anti-cheat', ['steam.exe', 'steamwebhelper.exe', 'epicgameslauncher.exe', 'riotclientservices.exe', 'vgc.exe', 'easyanticheat.exe', 'beservice.exe', 'battle.net.exe', 'eadesktop.exe', 'upc.exe', 'faceitservice.exe']],
+  ['Developer tools and updaters', ['antigravity.exe', 'code.exe', 'git.exe', 'git-remote-https.exe', 'node.exe', 'python.exe', 'docker.exe']],
+  ['Windows and Microsoft services', ['svchost.exe', 'onedrive.exe', 'ms-teams.exe']],
+];
+
+// "All apps" warning: resolves to the chosen exclusion list, or null if cancelled.
+function confirmAllApps(current = []) {
+  const known = new Set(RISKY_APPS.flatMap(([, apps]) => apps));
+  const preset = current.length ? new Set(current) : known;
+  const custom = current.filter((x) => !known.has(x));
+  const dlg = document.createElement('dialog');
+  dlg.className = 'modal';
+  dlg.innerHTML = `<h2>Filter all apps?</h2>
+    <p class="notice-text"><strong>Some apps may stop working.</strong> Games with anti-cheat, VPNs, other ad blockers and some updaters refuse filtered connections. The apps ticked below are left alone. You can change this any time.</p>
+    <div class="risky">${RISKY_APPS.map(([group, apps]) => `<fieldset><legend>${esc(group)}</legend>${apps.map((a) => `
+      <label class="chk"><input type="checkbox" value="${esc(a)}" ${preset.has(a) ? 'checked' : ''}><code>${esc(a)}</code></label>`).join('')}</fieldset>`).join('')}</div>
+    <label class="field"><span>Other apps to leave alone (executable names, one per line)</span><textarea id="dlg-other" rows="3" placeholder="myapp.exe">${esc(custom.join('\n'))}</textarea></label>
+    <div class="row"><div class="spacer"></div><button data-act="cancel">Cancel</button><button data-act="ok" class="primary">Filter all apps</button></div>`;
+  document.body.append(dlg);
+  dlg.showModal();
+  return new Promise((resolve) => {
+    const done = (value) => { dlg.close(); dlg.remove(); resolve(value); };
+    dlg.addEventListener('cancel', (e) => { e.preventDefault(); done(null); });
+    dlg.querySelector('[data-act="cancel"]').onclick = () => done(null);
+    dlg.querySelector('[data-act="ok"]').onclick = () => done([...new Set([
+      ...[...dlg.querySelectorAll('input[type=checkbox]:checked')].map((c) => c.value),
+      ...dlg.querySelector('#dlg-other').value.split(/[\r\n,]+/).map((x) => x.trim().toLowerCase()).filter(Boolean),
+    ])]);
+  });
+}
+
 function driverStatus(d) {
   if (!d) return '';
   if (d.running) {
@@ -219,15 +275,22 @@ function driverStatus(d) {
 
 views.https = async () => {
   const render = async () => {
-    const [st, s] = await Promise.all([api('GET', '/api/https/status'), api('GET', '/api/settings')]);
+    const [st, s, appStatus] = await Promise.all([api('GET', '/api/https/status'), api('GET', '/api/settings'), api('GET', '/api/status')]);
     const h = s.https;
+    const installed = appStatus.caInstalled; // set up by the installer: no manual steps needed
+    // Installed copy whose setup skipped in-page blocking: the service can set it up on request.
+    const canSetup = !installed && appStatus.systemDns?.guard;
     const c = st.core;
     const state = !h.enabled ? 'off' : c ? 'on' : 'paused';
     const title = !h.enabled ? 'Web filtering is off' : c ? `Proxy running on 127.0.0.1:${c.proxyPort}` : st.lastError || 'Starting…';
     const t = c?.stats || {};
     view.innerHTML = `
       <h1>Web filtering</h1><p class="sub">HTTPS-aware filtering: blocks ad and tracker requests, hides page elements, strips tracking parameters.</p>
-      ${h.enabled ? '' : `<div class="card notice"><strong>Advanced feature, off by default.</strong> DNS blocking already stops most ads for every app. Web filtering goes further (for example YouTube ads) but decrypts HTTPS traffic and can break some sites and apps. If a site breaks, add it to the exclusions below or switch this off.</div>`}
+      ${canSetup ? `<div class="card" id="setup-card"><h2>Block YouTube and in-page ads</h2>
+          <p class="hint" style="margin-top:0">DNS blocking already stops most ads for every app. This goes further by filtering inside your browsers' encrypted traffic, which is what removes YouTube and in-page ads.</p>
+          <p class="hint">To do that, AdHush creates a security certificate that exists only on this PC (its private key never leaves it) and asks Windows to trust it. It is removed again if you uninstall AdHush.</p>
+          <button id="setup-web" class="primary">Turn on</button></div>`
+        : h.enabled ? '' : `<div class="card notice"><strong>Web filtering is off.</strong> DNS blocking already stops most ads for every app. Web filtering goes further (for example YouTube ads) by filtering inside your browsers' encrypted traffic. If a site breaks, use "A website not working?" on the Overview page.</div>`}
       <div class="card hero ${state}">
         <div class="shield">${SHIELD}</div>
         <div><div class="title">${esc(title)}</div>
@@ -243,14 +306,14 @@ views.https = async () => {
         <div class="tile"><div class="v">${fmt(t.tunneled)}</div><div class="l">Passed through</div></div>
       </div>` : ''}
       <div class="grid">
-        <div class="card"><h2>Setup</h2>
+        ${installed ? '' : `<div class="card"><h2>Setup</h2>
           <ol class="hint" style="padding-left:18px;margin:0">
             <li style="margin-bottom:10px"><strong>Trust the AdHush certificate</strong> so HTTPS pages can be filtered. It is unique to this PC and its private key never leaves it.<br>
               <button id="ca" class="small" style="margin-top:6px">Download certificate</button> then run <code>scripts\\install-ca.ps1</code>. Windows asks you to confirm.</li>
             <li style="margin-bottom:10px"><strong>Route traffic through the filter</strong>: run <code>scripts\\set-system-proxy.ps1</code> (no admin needed). Undo it with <code>scripts\\restore-system-proxy.ps1</code>.</li>
             <li><strong>Firefox</strong> uses its own certificate store: set <code>security.enterprise_roots.enabled</code> to <code>true</code> in <code>about:config</code>.</li>
           </ol>
-        </div>
+        </div>`}
         <div class="card"><h2>Options</h2>
           <div class="toggle-row">${sw('h-cos', h.cosmetic)}<div class="body"><div class="name">Hide page elements</div><div class="desc">Inject cosmetic rules (element hiding) into web pages.</div></div></div>
           <div class="toggle-row">${sw('h-ev', h.skipEv)}<div class="body"><div class="name">Don't filter sites with EV certificates</div><div class="desc">Banks and payment sites often use Extended Validation certificates.</div></div></div>
@@ -261,32 +324,70 @@ views.https = async () => {
           <button id="h-save" class="primary">Save</button>
           ${c?.autoExcluded?.length ? `<h2 style="margin-top:16px">Auto-excluded hosts</h2><div class="hint mono">${c.autoExcluded.map(esc).join('<br>')}</div><button id="h-clear" class="small" style="margin-top:8px">Clear auto-exclusions</button>` : ''}
         </div>
-        <div class="card"><h2>Driver mode (per-app interception)</h2>
-          <p class="hint" style="margin-top:0">Uses the WinDivert driver to send chosen apps' web traffic through AdHush, even apps that ignore the Windows proxy. AdHush must run as administrator (the autostart task does).</p>
+        <div class="card"><h2>Which apps are filtered</h2>
           ${driverStatus(c?.driver)}
-          <div class="toggle-row">${sw('d-on', h.driver.enabled)}<div class="body"><div class="name">Enable driver mode</div></div></div>
-          <label class="field"><span>Apps to filter</span><select id="d-mode"><option value="selected">Only the apps listed below</option><option value="all">All apps except the excluded ones</option></select></label>
-          <label class="field"><span>Filtered apps (executable names, one per line)</span><textarea id="d-apps" rows="5">${esc(h.driver.apps.join('\n'))}</textarea></label>
-          <label class="field"><span>Never filter these apps</span><textarea id="d-ex" rows="3">${esc(h.driver.excluded.join('\n'))}</textarea></label>
-          <div class="toggle-row">${sw('d-quic', h.driver.blockQuic)}<div class="body"><div class="name">Block QUIC (HTTP/3) for filtered apps</div><div class="desc">Browsers then use HTTP/1.1–2 over TCP, which AdHush can filter.</div></div></div>
-          <button id="d-save" class="primary">Save driver settings</button>
+          <div class="choice" role="radiogroup" aria-label="Apps to filter">
+            <label class="choice-opt"><input type="radio" name="d-scope" value="selected" ${h.driver.mode !== 'all' ? 'checked' : ''}>
+              <span><span class="name">Only my browsers <span class="badge allowed">Recommended</span></span><span class="desc">Chrome, Edge, Firefox, Brave, Opera and other browsers. Safest choice.</span></span></label>
+            <label class="choice-opt"><input type="radio" name="d-scope" value="all" ${h.driver.mode === 'all' ? 'checked' : ''}>
+              <span><span class="name">All apps <span class="badge error">Advanced</span></span><span class="desc">Every program's web traffic goes through AdHush, except the apps you exclude.</span></span></label>
+          </div>
+          ${h.driver.mode === 'all' ? `<div class="hint" style="margin-top:10px">Excluded apps: ${h.driver.excluded.length ? h.driver.excluded.map((x) => `<code>${esc(x)}</code>`).join(' ') : 'none'} <button id="d-edit-ex" class="small">Edit</button></div>` : ''}
+          <div class="toggle-row" style="margin-top:8px">${sw('d-quic', h.driver.blockQuic)}<div class="body"><div class="name">Block QUIC (HTTP/3) for filtered apps</div><div class="desc">Apps then use HTTP/1.1–2 over TCP, which AdHush can filter.</div></div></div>
+          <details style="margin-top:8px"><summary class="hint">Advanced: edit the app lists by hand</summary>
+            <div class="toggle-row">${sw('d-on', h.driver.enabled)}<div class="body"><div class="name">Use the WinDivert driver</div><div class="desc">Needed when AdHush runs as a service (the normal install).</div></div></div>
+            <label class="field"><span>Filtered apps in "browsers" mode (executable names, one per line)</span><textarea id="d-apps" rows="5">${esc(h.driver.apps.join('\n'))}</textarea></label>
+            <label class="field"><span>Never filter these apps in "all apps" mode</span><textarea id="d-ex" rows="4">${esc(h.driver.excluded.join('\n'))}</textarea></label>
+            <button id="d-save" class="primary">Save</button>
+          </details>
         </div>
       </div>
       ${c ? `<div class="card"><h2>Recent web requests</h2>
         <table><thead><tr><th>Time</th><th>URL</th><th>Type</th><th>Action</th><th>Rule</th><th class="num">Status</th></tr></thead><tbody id="h-rows"></tbody></table></div>` : ''}`;
-    $('#h-on').onchange = (e) => act(() => api('PATCH', '/api/settings', { https: { enabled: e.target.checked } }), e.target.checked ? 'Web filtering enabled' : 'Web filtering disabled').then(() => setTimeout(render, 1500));
+    const setupWeb = async (btn) => {
+      if (!confirm('Turn on in-page ad blocking?\n\nAdHush will create a certificate unique to this PC and ask Windows to trust it, so it can filter inside your browsers. You can turn this off at any time.')) return false;
+      if (btn) { btn.disabled = true; btn.textContent = 'Setting up…'; }
+      try {
+        await act(() => api('POST', '/api/https/setup'), 'In-page ad blocking is on. Restart your browser to finish.');
+        setTimeout(render, 2500);
+        return true;
+      } catch {
+        if (btn) { btn.disabled = false; btn.textContent = 'Turn on'; }
+        return false;
+      }
+    };
+    if ($('#setup-web')) $('#setup-web').onclick = (e) => setupWeb(e.target);
+    $('#h-on').onchange = async (e) => {
+      // Never enable filtering without the certificate: every HTTPS site would fail.
+      if (e.target.checked && canSetup) {
+        if (!(await setupWeb($('#setup-web')))) e.target.checked = false;
+        return;
+      }
+      act(() => api('PATCH', '/api/settings', { https: { enabled: e.target.checked } }), e.target.checked ? 'Web filtering enabled' : 'Web filtering disabled').then(() => setTimeout(render, 1500));
+    };
     $('#h-save').onclick = () => act(() => api('PATCH', '/api/settings', { https: {
       cosmetic: $('#h-cos').checked, skipEv: $('#h-ev').checked, autoExclude: $('#h-auto').checked,
       exclusions: $('#h-ex').value.split(/\r?\n/).map((x) => x.trim().toLowerCase()).filter(Boolean),
       port: Number($('#h-port').value), controlPort: Number($('#h-cport').value),
     } }), 'Saved').then(() => setTimeout(render, 1000));
     if ($('#h-clear')) $('#h-clear').onclick = () => act(() => api('POST', '/api/https/clear-exclusions'), 'Cleared').then(render);
-    $('#d-mode').value = h.driver.mode;
     const exeList = (id) => $(id).value.split(/[\r\n,]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);
-    $('#d-save').onclick = () => act(() => api('PATCH', '/api/settings', { https: { driver: {
-      enabled: $('#d-on').checked, mode: $('#d-mode').value, apps: exeList('#d-apps'), excluded: exeList('#d-ex'), blockQuic: $('#d-quic').checked,
-    } } }), 'Driver settings saved').then(() => setTimeout(render, 2500));
-    $('#ca').onclick = async () => {
+    const saveDriver = (driver, msg) => act(() => api('PATCH', '/api/settings', { https: { driver } }), msg).then(() => setTimeout(render, 2500));
+    $('#d-save').onclick = () => saveDriver({
+      enabled: $('#d-on').checked, apps: exeList('#d-apps'), excluded: exeList('#d-ex'), blockQuic: $('#d-quic').checked,
+    }, 'Saved');
+    $('#d-quic').onchange = (e) => saveDriver({ blockQuic: e.target.checked }, 'Saved');
+    $$('input[name="d-scope"]').forEach((r) => (r.onchange = async () => {
+      if (r.value === 'selected') return saveDriver({ enabled: true, mode: 'selected' }, 'Filtering your browsers only');
+      const excluded = await confirmAllApps(h.driver.excluded);
+      if (!excluded) { $('input[name="d-scope"][value="selected"]').checked = true; return; }
+      saveDriver({ enabled: true, mode: 'all', excluded }, 'Filtering all apps');
+    }));
+    if ($('#d-edit-ex')) $('#d-edit-ex').onclick = async () => {
+      const excluded = await confirmAllApps(h.driver.excluded);
+      if (excluded) saveDriver({ excluded }, 'Excluded apps saved');
+    };
+    if ($('#ca')) $('#ca').onclick = async () => {
       const { pem } = await act(() => api('GET', '/api/https/ca'));
       const a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([pem], { type: 'application/x-x509-ca-cert' }));
@@ -624,6 +725,26 @@ views.stats = async (params) => {
   $('#clr').onclick = () => confirm('Delete all statistics?') && act(() => api('DELETE', '/api/stats'), 'Statistics cleared').then(() => views.stats(params));
 };
 
+views.browser = async () => {
+  const st = await api('GET', '/api/status');
+  view.innerHTML = `
+    <h1>Browser extension</h1><p class="sub">AdHush Assistant adds AdHush controls to Chrome, Edge and Brave. It's optional: ad blocking works without it.</p>
+    <div class="grid">
+      <div class="card"><h2>What it adds</h2>
+        <ul class="list feature-list">
+          <li><span><strong>On/off switch for each site</strong><br><span class="hint">Turn AdHush off for the site you're on, in one click.</span></span></li>
+          <li><span><strong>"Site not working?" button</strong><br><span class="hint">Fixes a broken page without leaving the browser.</span></span></li>
+          <li><span><strong>Block element</strong><br><span class="hint">Point at an annoying banner or box and hide it for good. Also on the right-click menu.</span></span></li>
+          <li><span><strong>Pause and resume</strong><br><span class="hint">Pause protection for 30 minutes from the toolbar.</span></span></li>
+        </ul>
+      </div>
+      <div class="card"><h2>Add it to your browser</h2>
+        <div id="bx-body"><div class="hint">…</div></div>
+      </div>
+    </div>`;
+  await renderExtensionCard($('#bx-body'), st);
+};
+
 views.settings = async () => {
   const s = await api('GET', '/api/settings');
   const d = s.dns;
@@ -635,6 +756,13 @@ views.settings = async () => {
         <div class="toggle-row">${sw('mdns', s.system.manageDns)}<div class="body"><div class="name">Filter every app on this PC</div>
           <div class="desc">Points Windows at AdHush for name lookups, including networks you connect to later. If AdHush ever stops answering, your normal internet settings come back automatically within a minute.</div></div></div>
         <div id="mdns-state" class="hint" style="margin-top:4px"></div>
+      </div>
+      <div class="card"><h2>Appearance</h2>
+        <div class="themes" role="radiogroup" aria-label="Theme">
+          ${THEMES.map((t) => `<button class="theme-opt${t.id === currentTheme ? ' on' : ''}" role="radio" aria-checked="${t.id === currentTheme}" data-theme-id="${t.id}">
+            <span class="theme-sw" aria-hidden="true">${t.sw.map((c) => `<i style="background:${c}"></i>`).join('')}</span>
+            <span class="theme-txt"><span class="name">${esc(t.name)}</span><span class="desc">${esc(t.desc)}</span></span></button>`).join('')}
+        </div>
       </div>
       <div class="card"><h2>Updates</h2>
         <div id="upd-body" class="hint">…</div>
@@ -675,8 +803,8 @@ views.settings = async () => {
       <div class="card"><h2>Protection modules</h2>
         <div class="toggle-row">${sw('sec', s.security.enabled)}<div class="body"><div class="name">Browsing security</div><div class="desc">Block known malware and phishing domains (Security filter group).</div></div></div>
         <div class="toggle-row">${sw('pc', s.parental.enabled)}<div class="body"><div class="name">Parental control</div><div class="desc">Enables the Parental filter group and the options below.</div></div></div>
-        <div class="toggle-row">${sw('ss', s.parental.safeSearch)}<div class="body"><div class="name">Enforce safe search</div><div class="desc">Google, Bing, DuckDuckGo, YouTube (restricted mode), Pixabay.</div></div></div>
-        <div class="toggle-row">${sw('adult', s.parental.blockAdult)}<div class="body"><div class="name">Block adult websites</div></div></div>
+        <div class="toggle-row sub" data-needs="pc">${sw('ss', s.parental.safeSearch)}<div class="body"><div class="name">Enforce safe search</div><div class="desc">Google, Bing, DuckDuckGo, YouTube (restricted mode), Pixabay.</div></div></div>
+        <div class="toggle-row sub" data-needs="pc">${sw('adult', s.parental.blockAdult)}<div class="body"><div class="name">Block adult websites</div></div></div>
         <label class="field" style="margin-top:12px"><span>Filter update interval</span><select id="ui">
           ${[[0, 'Never (manual only)'], [1, 'Every hour'], [6, 'Every 6 hours'], [12, 'Every 12 hours'], [24, 'Every day'], [48, 'Every 2 days'], [168, 'Every week']].map(([v, l]) => `<option value="${v}" ${v === s.filtering.updateIntervalHours ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         <button id="save-mod" class="primary">Save</button>
@@ -686,21 +814,25 @@ views.settings = async () => {
         <label class="field"><span>Query log size (entries, in memory)</span><input type="number" id="qls" min="100" max="100000" value="${s.queryLog.size}"></label>
         <div class="toggle-row">${sw('stt', s.stats.enabled)}<div class="body"><div class="name">Collect statistics</div></div></div>
         <label class="field"><span>Statistics retention (days)</span><input type="number" id="ret" min="1" max="365" value="${s.stats.retentionDays}"></label>
-        <label class="field"><span>Theme</span><select id="theme"><option value="auto">Follow system</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
         <div class="toggle-row">${sw('notif', s.ui.notifications)}<div class="body"><div class="name">Tray notifications</div><div class="desc">Filter updates, pause ending, and problems that need attention.</div></div></div>
         <div class="row"><button id="save-log" class="primary">Save</button><button id="rerun">Run setup wizard again</button></div>
         <h2 style="margin-top:22px">Backup</h2>
         <div class="row"><button id="exp">Export settings</button><label class="btn">Import…<input type="file" id="imp" accept=".json" hidden></label><button id="reset" class="danger">Reset to defaults</button></div>
       </div>
-      <div class="card" id="browser-ext"><h2>Browser extension</h2>
-        <p class="hint" style="margin-top:0">Optional. Adds a per-site on/off switch, a pause button and <em>Block element</em> to Chrome, Edge or Brave. Ad blocking works without it.</p>
-        <div id="bx-body"><div class="hint">…</div></div>
-      </div>
     </div>`;
-  api('GET', '/api/status').then((st) => {
-    renderExtensionCard($('#bx-body'), st);
-    renderDnsState($('#mdns-state'), st.systemDns);
-  }).catch(() => {});
+  api('GET', '/api/status').then((st) => renderDnsState($('#mdns-state'), st.systemDns)).catch(() => {});
+  $$('[data-theme-id]').forEach((b) => (b.onclick = () => {
+    applyTheme(b.dataset.themeId); // instant preview, then save
+    $$('[data-theme-id]').forEach((o) => { o.classList.toggle('on', o === b); o.setAttribute('aria-checked', String(o === b)); });
+    act(() => api('PATCH', '/api/settings', { ui: { theme: b.dataset.themeId } }));
+  }));
+  // Safe search / adult blocking only apply while parental control is on.
+  const syncParental = () => $$('[data-needs="pc"]').forEach((r) => {
+    r.classList.toggle('disabled', !$('#pc').checked);
+    r.querySelector('input').disabled = !$('#pc').checked;
+  });
+  $('#pc').addEventListener('change', syncParental);
+  syncParental();
   $('#mdns').onchange = (e) => act(() => api('PATCH', '/api/settings', { system: { manageDns: e.target.checked } }),
     e.target.checked ? 'Whole-PC protection on: applying within 15 seconds' : 'Whole-PC protection off: restoring normal DNS')
     .then(() => setTimeout(() => api('GET', '/api/status').then((st) => renderDnsState($('#mdns-state'), st.systemDns)).catch(() => {}), 16000));
@@ -713,7 +845,6 @@ views.settings = async () => {
   $('#upd-install').onclick = () => act(() => api('POST', '/api/updates/install'), 'Downloading the update…');
   $('#mode').value = d.upstreamMode;
   $('#bm').value = d.blockingMode;
-  $('#theme').value = s.ui.theme;
   const split = (id) => $(id).value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
   const num = (id) => Number($(id).value);
   const patch = (p) => act(() => api('PATCH', '/api/settings', p), 'Settings saved');
@@ -726,7 +857,7 @@ views.settings = async () => {
   $('#save-bl').onclick = () => patch({ dns: { blockingMode: $('#bm').value, customIpv4: $('#c4').value.trim(), customIpv6: $('#c6').value.trim(), blockedTtl: num('#bttl'), blockCnameCloaking: $('#cname').checked, cache: { enabled: $('#cache').checked, size: num('#csize'), minTtl: num('#cmin'), maxTtl: num('#cmax') } } });
   $('#flush').onclick = () => act(() => api('POST', '/api/dns/cache/clear'), 'Cache cleared');
   $('#save-mod').onclick = () => patch({ security: { enabled: $('#sec').checked }, parental: { enabled: $('#pc').checked, safeSearch: $('#ss').checked, blockAdult: $('#adult').checked }, filtering: { updateIntervalHours: num('#ui') } }).then(refreshSidebar);
-  $('#save-log').onclick = () => patch({ queryLog: { enabled: $('#ql').checked, size: num('#qls') }, stats: { enabled: $('#stt').checked, retentionDays: num('#ret') }, ui: { theme: $('#theme').value, notifications: $('#notif').checked } }).then(() => applyTheme($('#theme').value));
+  $('#save-log').onclick = () => patch({ queryLog: { enabled: $('#ql').checked, size: num('#qls') }, stats: { enabled: $('#stt').checked, retentionDays: num('#ret') }, ui: { notifications: $('#notif').checked } });
   $('#rerun').onclick = () => { location.hash = '#/welcome'; };
   $('#exp').onclick = async () => {
     const data = await act(() => api('GET', '/api/settings/export'));
@@ -881,7 +1012,7 @@ const ANNOYANCE_FILTERS = [40, 120, 122]; // pop-up ads (DNS), cookie notices, u
 views.welcome = async () => {
   const [s, st] = await Promise.all([api('GET', '/api/settings'), api('GET', '/api/status')]);
   const choice = {
-    ads: true, annoyances: false, security: s.security.enabled, parental: s.parental.enabled,
+    ads: true, annoyances: true, security: s.security.enabled, parental: s.parental.enabled,
     mdns: s.system.manageDns, web: s.https.enabled, preset: s.privacy.preset === 'custom' ? 'standard' : s.privacy.preset, notifications: s.ui.notifications,
   };
   let step = 0;
@@ -897,9 +1028,9 @@ views.welcome = async () => {
       ${row('security', 'Malware and phishing', 'Stops known scam and malware websites.')}
       ${row('parental', 'Parental control', 'Blocks adult websites and enforces safe search.')}`,
     () => `<h2>Web filtering and privacy</h2>
-      ${st.caInstalled || choice.web
-        ? row('web', 'Advanced: filter inside web pages', 'Removes ads DNS blocking cannot see (YouTube, in-page banners). Can break some sites and apps, so leave it off unless you need it.')
-        : `<div class="toggle-row">${sw('web', false)}<div class="body"><div class="name">Filter inside web pages</div><div class="desc">Not available: setup did not install this PC's certificate. Run setup again and tick "remove ads inside web pages".</div></div></div>`}
+      ${st.caInstalled || choice.web || st.systemDns?.guard
+        ? row('web', 'Block YouTube and in-page ads (recommended)', `Filters inside web pages in your browsers, where DNS blocking cannot reach.${st.caInstalled ? '' : ' AdHush creates a certificate unique to this PC for it.'} If a site misbehaves, use "A website not working?" on the Overview page.`)
+        : `<div class="toggle-row">${sw('web', false)}<div class="body"><div class="name">Filter inside web pages</div><div class="desc">Available in the installed version of AdHush.</div></div></div>`}
       <label class="field" style="margin-top:12px"><span>Tracking protection</span><select id="preset">
         <option value="standard">Standard: block trackers, keep sites working</option>
         <option value="high">High: also strip referrers and third-party cookies</option>
@@ -909,7 +1040,7 @@ views.welcome = async () => {
       <p>AdHush is running ${st.dns.listening.length ? '' : '<span class="err">(DNS listener not started: see Overview)</span>'}. The shield icon in the notification area turns
       <strong style="color:var(--accent)">green</strong> when protection is on and amber while paused.</p>
       <p class="hint">Right-click the tray icon to pause protection, for example when a site does not work.</p>
-      <p class="hint">Optional: add the browser extension for a per-site switch and element blocking under <strong>Settings → Browser extension</strong>.</p>`,
+      <p class="hint">Optional: add the browser extension for a per-site switch and element blocking on the <strong>Browser extension</strong> page.</p>`,
   ];
   const render = () => {
     view.innerHTML = `
@@ -923,7 +1054,7 @@ views.welcome = async () => {
         </div>
       </div>`;
     $$('.wbody input[type=checkbox]').forEach((el) => (el.onchange = () => { choice[el.id] = el.checked; }));
-    if (!st.caInstalled && !choice.web && $('#web')) $('#web').disabled = true;
+    if (!st.caInstalled && !st.systemDns?.guard && !choice.web && $('#web')) $('#web').disabled = true;
     if ($('#preset')) {
       $('#preset').value = choice.preset;
       $('#preset').onchange = (e) => { choice.preset = e.target.value; };
@@ -950,11 +1081,14 @@ views.welcome = async () => {
       if (on !== null && f.enabled !== on) await api('PATCH', `/api/filters/${f.id}`, { enabled: on });
     }
     await api('POST', '/api/privacy/preset', { preset: choice.preset });
+    // In-page blocking needs this PC's certificate first; the installed service can create it.
+    const web = choice.web && (st.caInstalled || (st.systemDns?.guard && await api('POST', '/api/https/setup').then(() => true)));
     await api('PATCH', '/api/settings', {
-      security: { enabled: choice.security }, parental: { enabled: choice.parental },
+      // Turning parental control on in the wizard means its two protections too.
+      security: { enabled: choice.security }, parental: { enabled: choice.parental, ...(choice.parental ? { safeSearch: true, blockAdult: true } : {}) },
       ...(st.systemDns?.guard ? { system: { manageDns: choice.mdns } } : {}),
       // Installed copies filter browsers through the WinDivert driver (the service runs elevated).
-      https: { enabled: choice.web, ...(st.caInstalled ? { driver: { enabled: choice.web } } : {}) }, ui: { notifications: choice.notifications },
+      https: { enabled: !!web, ...(st.caInstalled || st.systemDns?.guard ? { driver: { enabled: !!web } } : {}) }, ui: { notifications: choice.notifications },
     });
   });
   const finish = async (done) => {
@@ -968,21 +1102,34 @@ views.welcome = async () => {
 async function route() {
   timers.forEach(clearInterval);
   timers = [];
+  const token = ++navToken;
   const [path, query = ''] = (location.hash.replace(/^#\/?/, '') || 'home').split('?');
   const name = views[path] ? path : 'home';
   currentRoute = name;
-  document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.route === name));
+  document.querySelectorAll('#nav a').forEach((a) => {
+    a.classList.toggle('active', a.dataset.route === name);
+    if (a.dataset.route === name) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  });
+  // Instant feedback for pages that take a moment (Apps lists running programs).
+  const label = document.querySelector(`#nav a[data-route="${name}"]`)?.textContent.trim() || '';
+  const previous = view.firstElementChild; // still the old page until the new one draws
+  const loading = setTimeout(() => {
+    if (token === navToken && view.firstElementChild === previous) view.innerHTML = `<h1>${esc(label)}</h1><p class="sub loading">Loading…</p>`;
+  }, 150);
   try {
     await views[name](new URLSearchParams(query));
   } catch (e) {
-    if (currentRoute === name) view.innerHTML = `<h1>Something went wrong</h1><p class="err">${esc(e.message)}</p>`;
+    if (token === navToken) view.innerHTML = `<h1>Something went wrong</h1><p class="err">${esc(e.message)}</p>`;
+  } finally {
+    clearTimeout(loading);
   }
 }
 
 window.addEventListener('hashchange', route);
 refreshSidebar();
 setInterval(refreshSidebar, 15000);
-api('GET', '/api/settings').then((s) => {
+api('GET', '/api/settings', undefined, { detached: true }).then((s) => {
   applyTheme(s.ui.theme);
   if (!s.ui.onboarded && !location.hash.startsWith('#/welcome')) location.hash = '#/welcome'; // fires route()
   else route();

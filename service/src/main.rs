@@ -50,6 +50,17 @@ fn main() {
         }
         return;
     }
+    if args.get(1).map(String::as_str) == Some("--check-feed") {
+        // adhush-service.exe --check-feed <feed url>: a real update check that installs nothing.
+        match updater::dry_run(args.get(2).map(String::as_str).unwrap_or_default()) {
+            Ok(msg) => println!("OK: {msg}"),
+            Err(e) => {
+                println!("FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     if std::env::args().any(|a| a == "--console") {
         // Debug mode: run the supervisor in the foreground until Enter is pressed.
         let (tx, rx) = mpsc::channel();

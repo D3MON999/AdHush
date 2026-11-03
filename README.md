@@ -202,7 +202,9 @@ One-time setup: `node scripts/release.mjs keygen` creates `keys/update-signing.p
 Each release, with GitHub Releases as the host (any static HTTPS host works):
 1. Bump `version` in `package.json` (and `installer/adhush.rc`).
 2. Build: `powershell -ExecutionPolicy Bypass -File installer/build.ps1 -FeedUrl https://github.com/<you>/<repo>/releases/latest/download/latest.json -Notes "What changed"`. The feed URL is remembered in `installer/update-feed.txt` for later builds.
-3. Create a GitHub release and upload the three files from `installer/output`: `AdHushSetup-<version>.exe`, `latest.json`, `latest.json.sig`.
+3. Publish the source: `powershell -ExecutionPolicy Bypass -File installer/publish-source.ps1` copies the audited source archive into the GitHub Desktop clone (`C:\dev\adhush-upload\AdHush`); then in GitHub Desktop, *Commit to main* and *Push origin*.
+4. On GitHub, *Releases → Draft a new release*, tag `v<version>` (no spaces), and attach the four files from `installer/output`: `AdHushSetup-<version>.exe`, `latest.json`, `latest.json.sig`, `AdHush-<version>-source.zip`. Keep *Set as the latest release* ticked.
+5. Optional check: `service\target\release\adhush-service.exe --check-feed <feed url>` runs the real update check against the live release without installing anything.
 Installed copies pick it up within 6 hours. Only copies installed from a setup built *with* `-FeedUrl` know where to look.
 
 ### "A website isn't working"
@@ -225,6 +227,7 @@ To add it, use **Settings → Browser extension** in the AdHush window: it lists
 - **Web filtering (optional, advanced):** local per-PC root certificate, network and cosmetic rules, `removeparam`, scriptlets and `$redirect` resources, procedural and dynamic cosmetic filtering, popular extended rule syntaxes (`#$#`, `#%#`, `$removeheader`, `$cookie`, `$csp`), EV/pinned/invalid-certificate pass-through, per-app driver mode with QUIC blocking.
 - **Privacy:** tracking-protection presets (cookies, referrer, user agent, DNT/GPC, WebRTC/Push/Geolocation), anti-DPI, optional Windows privacy switches with snapshot/restore.
 - **Apps and extensions:** per-app filtering switches, userscripts and userstyles with a GM API.
+- **Themes:** Midnight Mint (default), Sand, Graphite & Ember, Raspberry, or match Windows (Settings → Appearance).
 - **Desktop:** tray icon and window, notifications, first-run wizard, "website not working" switch, Windows service with DNS safety net, logs bundle, signed automatic updates, installer and clean uninstaller, browser companion extension (Chromium).
 - Not included on purpose: accounts, licensing, telemetry. DoQ and DNSCrypt upstreams are not supported yet.
 

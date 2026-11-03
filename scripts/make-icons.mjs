@@ -6,7 +6,7 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const GREEN = [0x0f, 0x76, 0x6e]; // brand teal, --accent in ui/app.css
+const GREEN = [0x10, 0xb9, 0x81]; // brand emerald (Midnight Mint theme)
 
 // Same outline as the UI's SVG path: M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z (32-unit box).
 function insideShield(x, y) {

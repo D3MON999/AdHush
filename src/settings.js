@@ -3,7 +3,8 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { writeFileAtomic } from './fsutil.js';
 
-export const BLOCKING_MODES = ['default', 'refused', 'nxdomain', 'unspecified', 'custom'];
+export const THEMES = ['midnight', 'sand', 'ember', 'raspberry', 'auto'];
+export const BLOCKING_MODES =['default', 'refused', 'nxdomain', 'unspecified', 'custom'];
 
 export const DEFAULTS = {
   schemaVersion: 1,
@@ -79,7 +80,8 @@ export const DEFAULTS = {
     windows: { telemetry: false, advertisingId: false, recall: false, wapPush: false, feedback: false },
   },
   security: { enabled: true },
-  parental: { enabled: false, safeSearch: true, blockAdult: true },
+  // safeSearch / blockAdult only apply while parental control is enabled.
+  parental: { enabled: false, safeSearch: false, blockAdult: false },
   stats: { enabled: true, retentionDays: 30 },
   queryLog: { enabled: true, size: 5000 },
   api: { host: '127.0.0.1', port: 8899 },
@@ -88,7 +90,9 @@ export const DEFAULTS = {
   // Signed automatic updates, applied by the AdHush service (service/src/updater.rs).
   updates: { feedUrl: '', auto: true },
   // notifications: tray toasts; onboarded: the first-run wizard has been completed or skipped.
-  ui: { theme: 'auto', notifications: true, onboarded: false },
+  // theme: midnight | sand | ember | raspberry | auto (sand or midnight, following Windows)
+  // defaultsVersion: which release's recommended filter set this install has received (see App.upgradeDefaults).
+  ui: { theme: 'midnight', notifications: true, onboarded: false, defaultsVersion: 2 },
 };
 
 function isPlainObject(v) {
@@ -119,6 +123,7 @@ function validate(s) {
     if (!(Number.isInteger(s.privacy[k].minutes) && s.privacy[k].minutes >= 0)) errors.push(`privacy.${k}.minutes must be a whole number of minutes`);
   }
   if (!(s.privacy.antiDpi.tlsFragment >= 1 && s.privacy.antiDpi.tlsFragment <= 100)) errors.push('privacy.antiDpi.tlsFragment must be 1..100');
+  if (!THEMES.includes(s.ui.theme)) errors.push(`ui.theme must be one of ${THEMES.join(', ')}`);
   const d = s.https.driver;
   if (!['selected', 'all'].includes(d.mode)) errors.push('https.driver.mode must be selected or all');
   const ports = [s.https.port, s.https.controlPort, d.port, d.httpPort];
@@ -140,6 +145,11 @@ export class Settings extends EventEmitter {
       this.data = deepMerge(DEFAULTS, stored);
       // Installs that predate the wizard are already set up.
       if (stored.ui?.onboarded === undefined) this.data.ui.onboarded = true;
+      // Installs from before defaultsVersion existed got the 0.1 filter set.
+      if (stored.ui?.defaultsVersion === undefined) this.data.ui.defaultsVersion = 1;
+      // Themes before 0.2 were light / dark / auto.
+      const legacy = { light: 'sand', dark: 'midnight' }[this.data.ui.theme];
+      if (legacy) this.data.ui.theme = legacy;
     } catch (e) {
       if (e.code !== 'ENOENT') throw new Error(`cannot read ${this.file}: ${e.message}`);
       this.save();

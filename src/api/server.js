@@ -14,6 +14,7 @@ import { PRESETS, URL_TRACKING_FILTER_ID } from '../privacy.js';
 import { appState, appPatch } from '../apps.js';
 import { collectDiagnostics } from '../diagnostics.js';
 import { siteHost, brokenSitePatch } from '../sites.js';
+import { installCertificate } from '../certsetup.js';
 import { logger } from '../log.js';
 
 const log = logger('api');
@@ -76,6 +77,12 @@ export class ApiServer {
     return [
       ['GET', '/api/status', () => app.status()],
       ['GET', '/api/notifications', (_b, _p, q) => app.notifications.since(Number(q.get('since')) || 0)],
+      // One-click "block YouTube and in-page ads" for installs whose setup skipped it.
+      ['POST', '/api/https/setup', async () => {
+        const thumbprint = await installCertificate({ dataDir: app.dataDir, coreBinary: app.core.binary() });
+        app.settings.update({ https: { enabled: true, driver: { enabled: true, mode: 'selected' } } });
+        return { ok: true, thumbprint };
+      }],
       ['GET', '/api/updates', () => app.updateState()],
       ['POST', '/api/updates/check', () => { app.requestUpdate('check'); return { ok: true }; }],
       ['POST', '/api/updates/install', () => { app.requestUpdate('install'); return { ok: true }; }],

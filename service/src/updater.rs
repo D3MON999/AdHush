@@ -112,6 +112,22 @@ fn fetch(agent: &ureq::Agent, url: &str, limit: u64) -> Result<Vec<u8>, String> 
     res.body_mut().with_config().limit(limit).read_to_vec().map_err(|e| format!("{url}: {e}"))
 }
 
+/// Fetches and verifies a feed and downloads its installer exactly like a real update, without
+/// installing anything (adhush-service.exe --check-feed <url>).
+pub fn dry_run(feed: &str) -> Result<String, String> {
+    let a = agent(Duration::from_secs(30));
+    let manifest = fetch(&a, feed, 64 * 1024)?;
+    let sig = String::from_utf8(fetch(&a, &format!("{feed}.sig"), 4096)?).map_err(|_| "signature is not text")?;
+    let m = verify(&manifest, &sig)?;
+    let url = resolve(feed, m["url"].as_str().unwrap_or_default());
+    let bytes = fetch(&agent(Duration::from_secs(30 * 60)), &url, m["size"].as_u64().unwrap_or(MAX_SETUP_BYTES).min(MAX_SETUP_BYTES) + 1)?;
+    let ok = Some(format!("{:x}", Sha256::digest(&bytes)).as_str()) == m["sha256"].as_str();
+    if !ok {
+        return Err("installer does not match the signed checksum".into());
+    }
+    Ok(format!("signed {} OK; installer {} ({} bytes) matches its signed checksum", m["version"].as_str().unwrap_or("?"), url, bytes.len()))
+}
+
 fn check(app: &Path, data: &Path, install_now: bool) -> Result<(), String> {
     let s = settings(data);
     let feed = s["updates"]["feedUrl"].as_str().unwrap_or("").trim().to_string();
