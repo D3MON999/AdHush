@@ -827,10 +827,18 @@ views.settings = async () => {
     act(() => api('PATCH', '/api/settings', { ui: { theme: b.dataset.themeId } }));
   }));
   // Safe search / adult blocking only apply while parental control is on.
+  // Off while parental control is off (that's their real effect); their own choice comes back when it's on.
+  const parentalChoice = { ss: s.parental.safeSearch, adult: s.parental.blockAdult };
   const syncParental = () => $$('[data-needs="pc"]').forEach((r) => {
-    r.classList.toggle('disabled', !$('#pc').checked);
-    r.querySelector('input').disabled = !$('#pc').checked;
+    const on = $('#pc').checked;
+    const input = r.querySelector('input');
+    if (!on && !input.disabled) parentalChoice[input.id] = input.checked;
+    r.classList.toggle('disabled', !on);
+    input.disabled = !on;
+    input.checked = on && parentalChoice[input.id];
+    r.title = on ? '' : 'Turn on Parental control to use this';
   });
+  $$('[data-needs="pc"] input').forEach((i) => i.addEventListener('change', () => { parentalChoice[i.id] = i.checked; }));
   $('#pc').addEventListener('change', syncParental);
   syncParental();
   $('#mdns').onchange = (e) => act(() => api('PATCH', '/api/settings', { system: { manageDns: e.target.checked } }),
@@ -856,7 +864,7 @@ views.settings = async () => {
   };
   $('#save-bl').onclick = () => patch({ dns: { blockingMode: $('#bm').value, customIpv4: $('#c4').value.trim(), customIpv6: $('#c6').value.trim(), blockedTtl: num('#bttl'), blockCnameCloaking: $('#cname').checked, cache: { enabled: $('#cache').checked, size: num('#csize'), minTtl: num('#cmin'), maxTtl: num('#cmax') } } });
   $('#flush').onclick = () => act(() => api('POST', '/api/dns/cache/clear'), 'Cache cleared');
-  $('#save-mod').onclick = () => patch({ security: { enabled: $('#sec').checked }, parental: { enabled: $('#pc').checked, safeSearch: $('#ss').checked, blockAdult: $('#adult').checked }, filtering: { updateIntervalHours: num('#ui') } }).then(refreshSidebar);
+  $('#save-mod').onclick = () => patch({ security: { enabled: $('#sec').checked }, parental: { enabled: $('#pc').checked, safeSearch: parentalChoice.ss, blockAdult: parentalChoice.adult }, filtering: { updateIntervalHours: num('#ui') } }).then(refreshSidebar);
   $('#save-log').onclick = () => patch({ queryLog: { enabled: $('#ql').checked, size: num('#qls') }, stats: { enabled: $('#stt').checked, retentionDays: num('#ret') }, ui: { notifications: $('#notif').checked } });
   $('#rerun').onclick = () => { location.hash = '#/welcome'; };
   $('#exp').onclick = async () => {

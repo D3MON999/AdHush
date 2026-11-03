@@ -24,6 +24,8 @@ const log = logger('app');
 // Lists switched on by default from 0.2 (catalog ids): HaGeZi Multi PRO, Windows trackers, TIF mini,
 // fake/scam, pop-up ads, AdGuard Base (web), cookie banners (web), uBlock annoyances (web).
 export const RECOMMENDED_V2 = [7, 20, 32, 33, 40, 103, 120, 122];
+// Bump when adding a step to App.upgradeDefaults (and set settings DEFAULTS.ui.defaultsVersion to match).
+export const DEFAULTS_VERSION = 3;
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Unpacked browser extension: <install dir>\extension next to app\, or <repo>\extension.
 const EXTENSION_DIR = [path.join(ROOT, '..', 'extension'), path.join(ROOT, 'extension')]
@@ -201,12 +203,23 @@ export class App {
     return { managed: this.settings.get().system.manageDns, guard: !!state, ...state };
   }
 
-  // Brings installs from older releases up to the current recommended filter set, once.
-  // Only ever switches lists on; lists turned on by this release stay as the user leaves them.
+  // Brings installs from older releases up to the current defaults, one step per release, each
+  // exactly once (ui.defaultsVersion records the last step applied).
   async upgradeDefaults() {
-    const s = this.settings.get();
-    if (s.ui.defaultsVersion >= 2) return;
-    this.settings.update({ ui: { defaultsVersion: 2 } });
+    const from = this.settings.get().ui.defaultsVersion;
+    if (from >= DEFAULTS_VERSION) return;
+    this.settings.update({ ui: { defaultsVersion: DEFAULTS_VERSION } }); // never re-run, even after a crash
+    if (from < 2) await this.addRecommendedLists();
+    if (from < 3 && !this.settings.get().parental.enabled) {
+      // Before 0.2, safe search and adult blocking defaulted to on (inert while parental control is
+      // off). Clear those leftovers so upgraded installs match new ones.
+      this.settings.update({ parental: { safeSearch: false, blockAdult: false } });
+      log.info('cleared leftover parental sub-options');
+    }
+  }
+
+  // 0.2: only ever switches lists on; afterwards they stay as the user leaves them.
+  async addRecommendedLists() {
     const added = [];
     for (const id of RECOMMENDED_V2) {
       const f = this.filters.get(id);

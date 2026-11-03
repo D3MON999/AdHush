@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AdHush Assistant",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Companion for the AdHush ad blocker: per-site switch, pause, and element blocking.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA8JaXlvAjRP2TapUo7rLphY6oyQho35tVTW+Vw8ANamRxqceYMEfnIAnj+HFRaTkCR4QfLh8LrD23va8bpDgSzq9/2mppYYJHRl95hH/BcuLob3BAiMsA0ka73hi6cus9gcP+Fs4gQk/3vwnc0TYnViCeif7yRvfhkbau51dL6ZeOu74rynqlj60mp9Bja1T/m0xS6f1kOWcRTcR5vtGPhwblw0LVj42XDCU5b0VJTrbEhqrETPj7QP4T5zc+4cUN8GAqBaSuJIiac8OgSOkerWh1/p8VfwL/VO7ZMxFk4IYRoed6ZMGBAYVAD91RBg7xDjjRbJqJ2DuyXVc5vKZXOwIDAQAB",
   "permissions": ["nativeMessaging", "activeTab", "scripting", "contextMenus"],

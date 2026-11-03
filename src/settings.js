@@ -92,7 +92,7 @@ export const DEFAULTS = {
   // notifications: tray toasts; onboarded: the first-run wizard has been completed or skipped.
   // theme: midnight | sand | ember | raspberry | auto (sand or midnight, following Windows)
   // defaultsVersion: which release's recommended filter set this install has received (see App.upgradeDefaults).
-  ui: { theme: 'midnight', notifications: true, onboarded: false, defaultsVersion: 2 },
+  ui: { theme: 'midnight', notifications: true, onboarded: false, defaultsVersion: 3 },
 };
 
 function isPlainObject(v) {

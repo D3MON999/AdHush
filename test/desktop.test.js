@@ -51,10 +51,11 @@ test('default protection set', async () => {
 });
 
 test('upgrade from 0.1: recommended lists switched on once', async () => {
-  const { App, RECOMMENDED_V2 } = await import('../src/app.js');
+  const { App, RECOMMENDED_V2, DEFAULTS_VERSION } = await import('../src/app.js');
   const { FilterManager } = await import('../src/filters/manager.js');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adhush-upg-'));
-  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ ui: { theme: 'dark' } })); // a 0.1 install
+  // a 0.1 install: old parental defaults saved as on, parental control itself off
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ ui: { theme: 'dark' }, parental: { enabled: false, safeSearch: true, blockAdult: true } }));
   const settings = new Settings(dir).load();
   assert.equal(settings.get().ui.defaultsVersion, 1);
   const filters = new FilterManager(dir, settings).load();
@@ -62,10 +63,11 @@ test('upgrade from 0.1: recommended lists switched on once', async () => {
   const enabled = [];
   filters.setEnabled = async (id, on) => { filters.get(id).enabled = on; enabled.push(id); };
   const pushed = [];
-  const fake = { settings, filters, notifications: { push: (...a) => pushed.push(a) } };
+  const fake = { settings, filters, notifications: { push: (...a) => pushed.push(a) }, addRecommendedLists: App.prototype.addRecommendedLists };
   await App.prototype.upgradeDefaults.call(fake);
   assert.deepEqual(enabled.sort((a, b) => a - b), [...RECOMMENDED_V2].sort((a, b) => a - b));
-  assert.equal(settings.get().ui.defaultsVersion, 2);
+  assert.equal(settings.get().ui.defaultsVersion, DEFAULTS_VERSION);
+  assert.deepEqual(settings.get().parental, { enabled: false, safeSearch: false, blockAdult: false }, 'leftover parental defaults cleared');
   assert.ok(pushed.some(([, title]) => /Stronger protection/.test(title)));
   assert.ok(pushed.some(([, title]) => /YouTube/.test(title)), 'web filtering off: suggest turning it on');
   assert.ok(!filters.get(51).enabled && !filters.get(121).enabled, 'lists outside the recommended set stay as they were');
@@ -73,6 +75,24 @@ test('upgrade from 0.1: recommended lists switched on once', async () => {
   await App.prototype.upgradeDefaults.call(fake);
   assert.deepEqual(enabled, [], 'runs only once');
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('upgrade from 0.2.0: parental leftovers cleared, lists left as the user set them', async () => {
+  const { App, DEFAULTS_VERSION } = await import('../src/app.js');
+  for (const parentalOn of [false, true]) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adhush-upg2-'));
+    fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ ui: { defaultsVersion: 2 }, parental: { enabled: parentalOn, safeSearch: true, blockAdult: true } }));
+    const settings = new Settings(dir).load();
+    const enabled = [];
+    const fake = { settings, filters: { get: () => ({ enabled: false, name: 'x' }), setEnabled: async (id) => enabled.push(id) }, notifications: { push() {} }, addRecommendedLists: App.prototype.addRecommendedLists };
+    await App.prototype.upgradeDefaults.call(fake);
+    assert.deepEqual(enabled, [], 'a 0.2.0 install already got the lists; turned-off lists stay off');
+    assert.equal(settings.get().ui.defaultsVersion, DEFAULTS_VERSION);
+    const p = settings.get().parental;
+    if (parentalOn) assert.deepEqual([p.safeSearch, p.blockAdult], [true, true], 'parental users keep their choices');
+    else assert.deepEqual([p.safeSearch, p.blockAdult], [false, false]);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('catalog address change drops the old download but keeps the on/off choice', async () => {
