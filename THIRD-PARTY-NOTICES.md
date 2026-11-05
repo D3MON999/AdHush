@@ -26,7 +26,7 @@ data and formats AdHush works with; it is not affiliated with or endorsed by the
 
 ## Rust libraries
 
-230 crates.
+232 crates.
 
 | Crate | Version | Licence | Source |
 |---|---|---|---|
@@ -218,7 +218,9 @@ data and formats AdHush works with; it is not affiliated with or endorsed by the
 | unicode-segmentation | 1.13.3 | MIT OR Apache-2.0 | https://github.com/unicode-rs/unicode-segmentation |
 | untrusted | 0.9.0 | ISC | https://github.com/briansmith/untrusted |
 | ureq | 3.5.0 | MIT OR Apache-2.0 | https://github.com/algesten/ureq |
+| ureq | 3.5.1 | MIT OR Apache-2.0 | https://github.com/algesten/ureq |
 | ureq-proto | 0.6.5 | MIT OR Apache-2.0 | https://github.com/algesten/ureq-proto |
+| ureq-proto | 0.7.1 | MIT OR Apache-2.0 | https://github.com/algesten/ureq-proto |
 | url | 2.5.8 | MIT OR Apache-2.0 | https://github.com/servo/rust-url |
 | utf_types | 1.0.0 | Apache-2.0 OR MIT | https://github.com/hsivonen/utf_types |
 | utf8_iter | 1.1.0 | Apache-2.0 OR MIT | https://github.com/hsivonen/utf8_iter (*) |

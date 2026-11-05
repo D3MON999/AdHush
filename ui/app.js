@@ -845,9 +845,22 @@ views.settings = async () => {
     e.target.checked ? 'Whole-PC protection on: applying within 15 seconds' : 'Whole-PC protection off: restoring normal DNS')
     .then(() => setTimeout(() => api('GET', '/api/status').then((st) => renderDnsState($('#mdns-state'), st.systemDns)).catch(() => {}), 16000));
   $('#diag').onclick = () => saveDiagnostics($('#diag'));
-  const showUpdates = () => api('GET', '/api/updates').then((u) => renderUpdates(u)).catch(() => {});
-  showUpdates();
-  every(5000, showUpdates);
+  // Opening Settings checks for updates (at most every 10 minutes); the service answers within seconds.
+  let checkingSince = 0;
+  const showUpdates = () => api('GET', '/api/updates').then((u) => {
+    if (checkingSince && (u.checkedAt || 0) >= checkingSince) checkingSince = 0;
+    renderUpdates(u, !!checkingSince && Date.now() - checkingSince < 30000);
+    return u;
+  }).catch(() => null);
+  showUpdates().then((u) => {
+    const busy = ['downloading', 'installing'].includes(u?.status);
+    if (u?.configured && u.service && !busy && Date.now() - (u.checkedAt || 0) > 10 * 60 * 1000) {
+      checkingSince = Date.now();
+      renderUpdates(u, true);
+      api('POST', '/api/updates/check').catch(() => { checkingSince = 0; });
+    }
+  });
+  every(3000, showUpdates);
   $('#upd-auto').onchange = (e) => act(() => api('PATCH', '/api/settings', { updates: { auto: e.target.checked } }), 'Saved');
   $('#upd-check').onclick = () => act(() => api('POST', '/api/updates/check'), 'Checking for updates…');
   $('#upd-install').onclick = () => act(() => api('POST', '/api/updates/install'), 'Downloading the update…');
@@ -969,9 +982,13 @@ function renderDnsState(el, d) {
   el.innerHTML = `${label}${d.mode === 'filtering' ? '' : esc(d.detail || '')} ${when ? `<br>Since ${esc(when)}` : ''}`;
 }
 
-function renderUpdates(u) {
+function renderUpdates(u, checking = false) {
   const el = $('#upd-body');
-  if (!el) return;
+  if (!el || !u) return;
+  if (checking && u.configured && u.service) {
+    el.innerHTML = `Version <strong>${esc(u.current)}</strong> <span class="badge loading">Checking for updates…</span>`;
+    return;
+  }
   const when = (ms) => (ms ? new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'never');
   const disabled = !u.configured || !u.service;
   $('#upd-check').disabled = disabled;
