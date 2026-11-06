@@ -65,21 +65,22 @@ function sw(id, checked, extra = '') {
 
 const SHIELD = '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z"/><path d="m11 16 3.5 3.5L21.5 12" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-// Settings > Appearance. "auto" follows Windows: Sand when light, Midnight Mint when dark.
+// Settings > Appearance. "auto" follows Windows: Sand when light, Obsidian when dark.
 const THEMES = [
+  { id: 'obsidian', name: 'Obsidian', desc: 'Black and white, colour only for status', sw: ['#000000', '#1c1c1c', '#ffffff'] },
   { id: 'midnight', name: 'Midnight Mint', desc: 'Pure black with fresh mint', sw: ['#000000', '#141414', '#34d399'] },
   { id: 'sand', name: 'Sand', desc: 'Warm light theme', sw: ['#f7f3ec', '#fffdf9', '#c2410c'] },
   { id: 'ember', name: 'Graphite & Ember', desc: 'Graphite with bold orange', sw: ['#111111', '#222222', '#f97316'] },
   { id: 'raspberry', name: 'Raspberry', desc: 'Deep red-rose', sw: ['#140a0c', '#27151a', '#f0364f'] },
-  { id: 'auto', name: 'Match Windows', desc: 'Sand in light mode, Midnight Mint in dark', sw: ['#f7f3ec', '#000000', '#34d399'] },
+  { id: 'auto', name: 'Match Windows', desc: 'Sand in light mode, Obsidian in dark', sw: ['#f7f3ec', '#000000', '#ffffff'] },
 ];
-const LEGACY_THEMES = { light: 'sand', dark: 'midnight' };
+const LEGACY_THEMES = { light: 'sand', dark: 'obsidian' };
 const systemDark = matchMedia('(prefers-color-scheme: dark)');
-let currentTheme = 'midnight';
+let currentTheme = 'obsidian';
 
 function applyTheme(theme) {
-  currentTheme = LEGACY_THEMES[theme] || (THEMES.some((t) => t.id === theme) ? theme : 'midnight');
-  const id = currentTheme === 'auto' ? (systemDark.matches ? 'midnight' : 'sand') : currentTheme;
+  currentTheme = LEGACY_THEMES[theme] || (THEMES.some((t) => t.id === theme) ? theme : 'obsidian');
+  const id = currentTheme === 'auto' ? (systemDark.matches ? 'obsidian' : 'sand') : currentTheme;
   if (id === 'midnight') delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = id;
 }
@@ -97,54 +98,94 @@ async function refreshSidebar() {
   }
 }
 
+// The sidebar's icon for a page, reused on the Overview tiles.
+const navIcon = (route) => document.querySelector(`#nav a[data-route="${route}"] svg`)?.outerHTML || '';
+
+// Small area chart of blocked requests per hour; the table of numbers sits on the Statistics page.
+function sparkline(series = []) {
+  const pts = series.map((p) => p.blocked);
+  const W = 400;
+  const H = 56;
+  const max = Math.max(1, ...pts);
+  const x = (i) => (pts.length > 1 ? (i / (pts.length - 1)) * W : W);
+  const y = (v) => H - 3 - (v / max) * (H - 8);
+  const line = (pts.length ? pts : [0, 0]).map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Blocked requests per hour, last 24 hours">
+    <polygon points="0,${H} ${line} ${W},${H}"/><polyline points="${line}"/></svg>`;
+}
+
 // ---------- views ----------
 const views = {};
 
 views.home = async (params) => {
   let focusFix = params?.has('fix'); // #/home?fix (tray menu) jumps to the "site not working" box
   const render = async () => {
-    const [st, stats, { sites: broken }] = await Promise.all([api('GET', '/api/status'), api('GET', '/api/stats?period=24h'), api('GET', '/api/sites/broken')]);
+    const [st, stats, { sites: broken }, s] = await Promise.all([api('GET', '/api/status'), api('GET', '/api/stats?period=24h'), api('GET', '/api/sites/broken'), api('GET', '/api/settings')]);
     const p = st.protection;
     const state = !p.enabled ? 'off' : p.active ? 'on' : 'paused';
     const until = new Date(p.pausedUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const title = { on: 'Your PC is protected', off: 'Protection is turned off', paused: `Protection resumes at ${until}` }[state];
-    const pill = { on: 'Active', off: 'Off', paused: 'Paused' }[state];
+    const [lead, strong] = { on: ['Your PC is', 'protected'], off: ['Protection is', 'off'], paused: ['Paused until', until] }[state];
+    const tile = (route, name, desc) => `<a class="launch" href="#/${route}">${navIcon(route)}<span class="name">${esc(name)}</span><span class="desc">${esc(desc)}</span></a>`;
+    const statusRow = (on, name, detail) => `<li><span class="dot ${on}"></span><span class="status-name">${esc(name)}</span><span class="hint">${esc(detail)}</span></li>`;
+    const listening = st.dns.listening.length > 0;
     view.innerHTML = `
-      <h1>Overview</h1><p class="sub">Blocks ads, trackers, malware and phishing for every app on this PC.</p>
-      <div class="card hero ${state}">
-        <div class="shield">${SHIELD}</div>
-        <div><span class="state-pill">${pill}</span><div class="title">${esc(title)}</div>
-          <div class="hint">${fmt(st.engine.rules)} active rules from ${st.filters.enabled} filters · updated ${ago(st.engine.builtAt)}</div></div>
-        <div class="spacer"></div>
-        <div class="row">
-          ${state !== 'off' ? '<button data-pause="5">Pause 5 min</button><button data-pause="30">30 min</button><button data-pause="60">1 h</button>' : ''}
-          ${state === 'paused' ? '<button id="resume" class="primary">Resume</button>' : ''}
-          <label class="switch big" title="Protection on/off"><input type="checkbox" id="prot" aria-label="Protection" ${p.enabled ? 'checked' : ''}><span></span></label>
-        </div>
+      <div class="greet">
+        <h1 class="display">${esc(lead)} <b>${esc(strong)}</b></h1>
+        <p class="sub">${fmt(st.engine.rules)} active rules from ${st.filters.enabled} filters · updated ${ago(st.engine.builtAt)}</p>
       </div>
-      <div class="tiles">
-        <div class="tile"><div class="v">${fmt(stats.total)}</div><div class="l">DNS queries (24 h)</div></div>
-        <div class="tile"><div class="v">${fmt(stats.blocked)}</div><div class="l">Blocked</div></div>
-        <div class="tile"><div class="v">${stats.blockedPercent}%</div><div class="l">Blocked share</div></div>
-        <div class="tile"><div class="v">${stats.avgMs} ms</div><div class="l">Avg. processing</div></div>
+      <div class="launch-grid">
+        <div class="launch-main ${state}">
+          <div class="row launch-top"><span class="shield-mark">${SHIELD}</span><div class="spacer"></div>
+            <label class="switch big" title="Protection on/off"><input type="checkbox" id="prot" aria-label="Protection" ${p.enabled ? 'checked' : ''}><span></span></label></div>
+          <div class="spacer"></div>
+          <div class="launch-title">${{ on: 'Protection is on', off: 'Protection is off', paused: 'Protection is paused' }[state]}</div>
+          <div class="launch-desc">Blocks ads, trackers, malware and phishing.</div>
+          <div class="row launch-actions">
+            ${state === 'on' ? '<button data-pause="5">Pause 5 min</button><button data-pause="30">30 min</button><button data-pause="60">1 h</button>' : ''}
+            ${state === 'paused' ? '<button id="resume">Resume now</button>' : ''}
+          </div>
+        </div>
+        ${tile('filters', 'Filters', `${st.filters.enabled} lists active`)}
+        ${tile('https', 'Web filtering', s.https.enabled ? 'On for your browsers' : 'Off')}
+        ${tile('privacy', 'Tracking protection', s.privacy.enabled ? `${s.privacy.preset[0].toUpperCase()}${s.privacy.preset.slice(1)} preset` : 'Off')}
+        ${tile('log', 'Query log', 'Live requests from this PC')}
+        ${tile('apps', 'Apps', 'Choose what gets filtered')}
+        ${tile('browser', 'Browser extension', 'Site switch and element blocking')}
+      </div>
+      <div class="panels">
+        <div class="card panel"><div class="panel-head"><span>Last 24 hours</span><span>Blocked requests</span></div>
+          <div class="panel-stats">
+            <div><div class="v">${fmt(stats.total)}</div><div class="l">DNS queries</div></div>
+            <div><div class="v">${fmt(stats.blocked)}</div><div class="l">Blocked</div></div>
+            <div><div class="v">${stats.blockedPercent}%</div><div class="l">Blocked share</div></div>
+            <div><div class="v">${stats.avgMs} ms</div><div class="l">Avg. speed</div></div>
+          </div>
+          ${sparkline(stats.series)}
+        </div>
+        <div class="card panel"><div class="panel-head"><span>Most blocked</span><span>24 h</span></div>
+          ${stats.topBlocked.length ? `<ul class="list">${stats.topBlocked.slice(0, 5).map((d) => `<li><span class="name">${esc(d.name)}</span><span class="badge blocked">${fmt(d.count)}</span></li>`).join('')}</ul>` : '<div class="empty">Nothing blocked yet</div>'}
+        </div>
+        <div class="card panel"><div class="panel-head"><span>Status</span></div>
+          <ul class="status-list">
+            ${statusRow(listening ? 'on' : 'down', 'DNS filtering', listening ? 'Running' : 'Not running')}
+            ${statusRow(s.system.manageDns ? 'on' : '', 'Whole-PC protection', s.system.manageDns ? 'On' : 'Off')}
+            ${statusRow(s.https.enabled ? 'on' : '', 'Web filtering', s.https.enabled ? 'On' : 'Off')}
+            ${statusRow(broken.length ? 'paused' : 'on', 'Sites switched off', broken.length ? String(broken.length) : 'None')}
+            ${st.gaming.active ? statusRow('on', 'Gaming mode', st.gaming.exe) : ''}
+          </ul>
+          <a class="btn small" href="#/check" style="margin-top:12px">Check my protection</a>
+          ${st.dns.errors.map((e) => `<div class="err">${esc(e)}</div>`).join('')}
+          ${s.system.manageDns ? '' : '<div class="hint" style="margin-top:8px">To filter every app, turn on <a href="#/settings">Whole-PC protection</a>.</div>'}
+        </div>
       </div>
       <div class="card" id="fix-card"><h2>A website not working?</h2>
         <p class="hint" style="margin-top:0">Turn AdHush off for just that site: nothing is blocked there and its traffic is left untouched. Everything else stays protected.</p>
         <div class="row"><input type="text" id="fix-site" placeholder="example.com or paste the page address" style="flex:1;min-width:220px" aria-label="Website address"><button id="fix-btn" class="primary">Turn off for this site</button></div>
         ${broken.length ? `<div class="hint" style="margin-top:12px">AdHush is off for:</div><ul class="list">${broken.map((h) => `<li><span class="name">${esc(h)}</span><button class="small" data-unfix="${esc(h)}">Turn back on</button></li>`).join('')}</ul>` : ''}
       </div>
-      <div class="grid">
-        <div class="card"><h2>Most blocked (24 h)</h2>
-          ${stats.topBlocked.length ? `<ul class="list">${stats.topBlocked.slice(0, 10).map((d) => `<li><span class="name">${esc(d.name)}</span><span>${fmt(d.count)}</span></li>`).join('')}</ul>` : '<div class="empty">Nothing blocked yet</div>'}
-        </div>
-        <div class="card"><h2>Check a domain</h2>
-          <div class="row"><input type="text" id="chk" placeholder="ads.example.com" style="flex:1"><button id="chk-btn">Check</button></div>
-          <div id="chk-out" class="hint" style="margin-top:10px"></div>
-          <h2 style="margin-top:22px">DNS service</h2>
-          ${st.dns.listening.length ? `<div class="hint">Listening on ${st.dns.listening.map((l) => `<code>${esc(l)}</code>`).join(' ')}</div>` : ''}
-          ${st.dns.errors.map((e) => `<div class="err">${esc(e)}</div>`).join('')}
-          <div class="hint" style="margin-top:8px">To filter every app on this PC, turn on <a href="#/settings">Settings → Whole-PC protection</a>.</div>
-        </div>
+      <div class="card"><h2>Check a domain</h2>
+        <div class="row"><input type="text" id="chk" placeholder="ads.example.com" style="flex:1"><button id="chk-btn">Check</button></div>
+        <div id="chk-out" class="hint" style="margin-top:10px"></div>
       </div>`;
     $('#prot').onchange = (e) => act(() => api('POST', '/api/protection', { enabled: e.target.checked }), e.target.checked ? 'Protection enabled' : 'Protection disabled').then(render).then(refreshSidebar);
     $$('[data-pause]').forEach((b) => (b.onclick = () => act(() => api('POST', '/api/protection/pause', { minutes: Number(b.dataset.pause) }), `Paused for ${b.dataset.pause} min`).then(render).then(refreshSidebar)));
@@ -725,6 +766,46 @@ views.stats = async (params) => {
   $('#clr').onclick = () => confirm('Delete all statistics?') && act(() => api('DELETE', '/api/stats'), 'Statistics cleared').then(() => views.stats(params));
 };
 
+// Fixes offered by the protection check.
+const CHECK_FIXES = {
+  resume: () => api('POST', '/api/protection', { enabled: true }),
+  wholePc: () => api('PATCH', '/api/settings', { system: { manageDns: true } }),
+  browserGuard: () => api('PATCH', '/api/settings', { system: { stopSecureDns: true } }),
+};
+
+views.check = async () => {
+  const LABEL = { ok: 'Good', warn: 'Needs a look', fail: 'Problem', off: 'Off' };
+  const BADGE = { ok: 'allowed', warn: 'error', fail: 'blocked', off: '' };
+  const HEADLINE = {
+    ok: ['Everything is', 'working'],
+    warn: ['Mostly fine,', 'a few things to check'],
+    fail: ['Something is', 'wrong'],
+  };
+  const run = async () => {
+    view.innerHTML = '<div class="greet"><h1 class="display">Checking <b>your protection</b></h1><p class="sub loading">This takes a few seconds…</p></div>';
+    const r = await api('GET', '/api/selftest');
+    view.innerHTML = `
+      <div class="greet"><h1 class="display">${esc(HEADLINE[r.result][0])} <b>${esc(HEADLINE[r.result][1])}</b></h1>
+        <p class="sub">Checked ${new Date(r.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}. These are real tests, not just settings.</p></div>
+      <div class="card"><ul class="check-list">${r.checks.map((c) => `<li>
+        <span class="dot ${{ ok: 'on', warn: 'paused', fail: 'down', off: '' }[c.status]}"></span>
+        <div class="body"><div class="name">${esc(c.name)} <span class="badge ${BADGE[c.status]}">${LABEL[c.status]}</span></div><div class="desc">${esc(c.detail)}</div></div>
+        ${c.fix?.action ? `<button class="small" data-fix="${esc(c.fix.action)}">${esc(c.fix.label)}</button>` : ''}
+        ${c.fix?.href ? `<a class="btn small" href="${esc(c.fix.href)}">${esc(c.fix.label)}</a>` : ''}</li>`).join('')}</ul></div>
+      <div class="row"><button id="again" class="primary">Run again</button><button id="logs">Save logs file</button></div>`;
+    $('#again').onclick = run;
+    $('#logs').onclick = () => saveDiagnostics($('#logs'));
+    $$('[data-fix]').forEach((b) => (b.onclick = async () => {
+      b.disabled = true;
+      await act(() => CHECK_FIXES[b.dataset.fix](), 'Done').catch(() => {});
+      await new Promise((r2) => setTimeout(r2, b.dataset.fix === 'wholePc' ? 16000 : 1500)); // the service applies it on its next pass
+      refreshSidebar();
+      run();
+    }));
+  };
+  await run();
+};
+
 views.browser = async () => {
   const st = await api('GET', '/api/status');
   view.innerHTML = `
@@ -756,6 +837,14 @@ views.settings = async () => {
         <div class="toggle-row">${sw('mdns', s.system.manageDns)}<div class="body"><div class="name">Filter every app on this PC</div>
           <div class="desc">Points Windows at AdHush for name lookups, including networks you connect to later. If AdHush ever stops answering, your normal internet settings come back automatically within a minute.</div></div></div>
         <div id="mdns-state" class="hint" style="margin-top:4px"></div>
+        <div class="toggle-row">${sw('sdns', s.system.stopSecureDns)}<div class="body"><div class="name">Stop browsers skipping AdHush</div>
+          <div class="desc">Browsers with "Secure DNS" can bypass ad blocking. This turns it off in Chrome, Edge, Brave and Firefox while whole-PC protection is on. Your browser may show "managed by your organization": that's this setting, and it's removed if you turn this off or uninstall.</div></div></div>
+      </div>
+      <div class="card"><h2>Gaming mode</h2>
+        <div class="toggle-row">${sw('game', s.gaming.enabled)}<div class="body"><div class="name">Don't interrupt full-screen games</div>
+          <div class="desc">While a game is full screen, AdHush holds its notifications and updates until you finish. In "All apps" web filtering it also leaves the game alone, so anti-cheat isn't upset.</div></div></div>
+        ${s.gaming.games.length ? `<div class="hint" style="margin-top:6px">Games left out of web filtering:</div>
+          <ul class="list">${s.gaming.games.map((g) => `<li><span class="name">${esc(g)}</span><button class="small" data-forget="${esc(g)}">Filter it again</button></li>`).join('')}</ul>` : ''}
       </div>
       <div class="card"><h2>Appearance</h2>
         <div class="themes" role="radiogroup" aria-label="Theme">
@@ -771,7 +860,7 @@ views.settings = async () => {
       </div>
       <div class="card"><h2>Get help</h2>
         <p class="hint" style="margin-top:0">Something not working? Save a logs file and send it to whoever helps you. It contains AdHush's logs and settings, but not your browsing statistics, the query log or any passwords or keys.</p>
-        <div class="row"><button id="diag" class="primary">Save logs file</button></div>
+        <div class="row"><a class="btn" href="#/check">Check my protection</a><button id="diag" class="primary">Save logs file</button></div>
         <p class="hint">No internet at all? Use <strong>Restore normal internet</strong> in the Start menu (AdHush folder) or the tray icon's menu.</p>
         <p class="hint">AdHush is free software under the GNU GPL v3. Licences and third-party notices are in the <code>licenses</code> folder of the installation.</p>
       </div>
@@ -844,6 +933,9 @@ views.settings = async () => {
   $('#mdns').onchange = (e) => act(() => api('PATCH', '/api/settings', { system: { manageDns: e.target.checked } }),
     e.target.checked ? 'Whole-PC protection on: applying within 15 seconds' : 'Whole-PC protection off: restoring normal DNS')
     .then(() => setTimeout(() => api('GET', '/api/status').then((st) => renderDnsState($('#mdns-state'), st.systemDns)).catch(() => {}), 16000));
+  $('#sdns').onchange = (e) => act(() => api('PATCH', '/api/settings', { system: { stopSecureDns: e.target.checked } }), 'Saved');
+  $('#game').onchange = (e) => act(() => api('PATCH', '/api/settings', { gaming: { enabled: e.target.checked } }), 'Saved');
+  $$('[data-forget]').forEach((b) => (b.onclick = () => act(() => api('POST', '/api/gaming/forget', { exe: b.dataset.forget }), 'It will be filtered again').then(() => route())));
   $('#diag').onclick = () => saveDiagnostics($('#diag'));
   // Opening Settings checks for updates (at most every 10 minutes); the service answers within seconds.
   let checkingSince = 0;
@@ -1038,7 +1130,7 @@ views.welcome = async () => {
   const [s, st] = await Promise.all([api('GET', '/api/settings'), api('GET', '/api/status')]);
   const choice = {
     ads: true, annoyances: true, security: s.security.enabled, parental: s.parental.enabled,
-    mdns: s.system.manageDns, web: s.https.enabled, preset: s.privacy.preset === 'custom' ? 'standard' : s.privacy.preset, notifications: s.ui.notifications,
+    theme: currentTheme, mdns: s.system.manageDns, web: s.https.enabled, preset: s.privacy.preset === 'custom' ? 'standard' : s.privacy.preset, notifications: s.ui.notifications,
   };
   let step = 0;
   const row = (id, name, desc) => `<div class="toggle-row">${sw(id, choice[id])}<div class="body"><div class="name">${name}</div><div class="desc">${desc}</div></div></div>`;
@@ -1046,6 +1138,12 @@ views.welcome = async () => {
     () => `<h2>Welcome to AdHush</h2>
       <p>AdHush blocks ads, trackers and dangerous websites for every app on this PC: browsers, games and Windows itself.</p>
       <p class="hint">This takes under a minute. Everything can be changed later in the app.</p>`,
+    () => `<h2>Pick a look</h2>
+      <p class="hint" style="margin-top:0">Click one to try it right now. You can change it any time in Settings.</p>
+      <div class="look-grid" role="radiogroup" aria-label="Theme">${THEMES.filter((t) => t.id !== 'auto').map((t) => `
+        <button class="theme-opt${t.id === choice.theme ? ' on' : ''}" role="radio" aria-checked="${t.id === choice.theme}" data-look="${t.id}">
+          <span class="theme-sw" aria-hidden="true">${t.sw.map((c) => `<i style="background:${c}"></i>`).join('')}</span>
+          <span class="theme-txt"><span class="name">${esc(t.name)}</span><span class="desc">${esc(t.desc)}</span></span></button>`).join('')}</div>`,
     () => `<h2>What should be blocked?</h2>
       ${st.systemDns?.guard ? row('mdns', 'Filter every app on this PC', 'Recommended. If AdHush ever stops working, normal internet comes back on its own.') : ''}
       ${row('ads', 'Ads and trackers', 'The core blocklists. Recommended for everyone.')}
@@ -1084,6 +1182,11 @@ views.welcome = async () => {
       $('#preset').value = choice.preset;
       $('#preset').onchange = (e) => { choice.preset = e.target.value; };
     }
+    $$('[data-look]').forEach((b) => (b.onclick = () => {
+      choice.theme = b.dataset.look;
+      applyTheme(choice.theme);
+      render();
+    }));
     if ($('#w-back')) $('#w-back').onclick = () => { step--; render(); };
     if ($('#w-skip')) $('#w-skip').onclick = () => finish(false);
     $('#w-next').onclick = async () => {
@@ -1113,7 +1216,7 @@ views.welcome = async () => {
       security: { enabled: choice.security }, parental: { enabled: choice.parental, ...(choice.parental ? { safeSearch: true, blockAdult: true } : {}) },
       ...(st.systemDns?.guard ? { system: { manageDns: choice.mdns } } : {}),
       // Installed copies filter browsers through the WinDivert driver (the service runs elevated).
-      https: { enabled: !!web, ...(st.caInstalled || st.systemDns?.guard ? { driver: { enabled: !!web } } : {}) }, ui: { notifications: choice.notifications },
+      https: { enabled: !!web, ...(st.caInstalled || st.systemDns?.guard ? { driver: { enabled: !!web } } : {}) }, ui: { notifications: choice.notifications, theme: choice.theme },
     });
   });
   const finish = async (done) => {

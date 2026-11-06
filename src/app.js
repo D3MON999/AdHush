@@ -18,6 +18,7 @@ import { TrackerDb } from './trackers.js';
 import { AppCatalog } from './apps.js';
 import { UserscriptManager } from './userscripts.js';
 import { Notifications } from './notifications.js';
+import { secureDnsRules, SELFTEST_RULE } from './browserguard.js';
 import { logger } from './log.js';
 
 const log = logger('app');
@@ -25,7 +26,7 @@ const log = logger('app');
 // fake/scam, pop-up ads, AdGuard Base (web), cookie banners (web), uBlock annoyances (web).
 export const RECOMMENDED_V2 = [7, 20, 32, 33, 40, 103, 120, 122];
 // Bump when adding a step to App.upgradeDefaults (and set settings DEFAULTS.ui.defaultsVersion to match).
-export const DEFAULTS_VERSION = 3;
+export const DEFAULTS_VERSION = 4;
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Unpacked browser extension: <install dir>\extension next to app\, or <repo>\extension.
 const EXTENSION_DIR = [path.join(ROOT, '..', 'extension'), path.join(ROOT, 'extension')]
@@ -36,6 +37,8 @@ export const SPECIAL_FILTERS = {
   [-2]: 'Allowlist',
   [-3]: 'Blocklist',
   [-4]: 'Safe search',
+  [-5]: 'Browser guard',
+  [-6]: 'AdHush self-test',
 };
 
 export function normalizeDomain(input) {
@@ -93,6 +96,8 @@ export class App {
     if (s.filtering.allowlist.enabled) sources.push({ filterId: -2, text: domains(s.filtering.allowlist.domains).map((d) => `@@||${d}^$important`).join('\n') });
     if (s.filtering.blocklist.enabled) sources.push({ filterId: -3, text: domains(s.filtering.blocklist.domains).map((d) => `||${d}^$important`).join('\n') });
     if (s.parental.enabled && s.parental.safeSearch) sources.push({ filterId: -4, text: safeSearchRules() });
+    if (s.system.stopSecureDns) sources.push({ filterId: -5, text: secureDnsRules() });
+    sources.push({ filterId: -6, text: SELFTEST_RULE });
     return sources;
   }
 
@@ -117,7 +122,7 @@ export class App {
       Object.assign(this.cache, { size: s.dns.cache.size, minTtl: s.dns.cache.minTtl, maxTtl: s.dns.cache.maxTtl });
       this.cache.clear();
     }
-    if (sections.some((k) => ['filtering', 'parental', 'security'].includes(k))) this.scheduleRebuild();
+    if (sections.some((k) => ['filtering', 'parental', 'security', 'system'].includes(k))) this.scheduleRebuild();
     if (sections.includes('queryLog')) this.queryLog.resize(s.queryLog.size);
     if (sections.includes('stats')) this.stats.retentionDays = s.stats.retentionDays;
     if (sections.includes('protection')) {
@@ -126,7 +131,14 @@ export class App {
     }
     if (sections.includes('https')) this.core.sync();
     if (sections.some((k) => ['filtering', 'parental', 'security', 'protection', 'https', 'privacy', 'apps', 'extensions'].includes(k))) this.core.scheduleReload();
-    if (sections.includes('privacy')) this.windowsPrivacy.sync(s.privacy.windows);
+    if (sections.includes('privacy') || sections.includes('system')) this.windowsPrivacy.sync(this.windowsWanted());
+  }
+
+  // Registry changes to keep in place: the user's privacy switches, plus the browser guard while
+  // Windows actually points at AdHush (without that, turning off Secure DNS would gain nothing).
+  windowsWanted() {
+    const s = this.settings.get();
+    return { ...s.privacy.windows, browserDoh: s.system.manageDns && s.system.stopSecureDns };
   }
 
   // Announces the end of a timed pause (the pause itself needs no timer: isProtectionActive checks the clock).
@@ -175,7 +187,7 @@ export class App {
     }, 24 * 3600 * 1000);
     this.extensionTimer.unref();
     this.core.sync();
-    this.windowsPrivacy.sync(this.settings.get().privacy.windows);
+    this.windowsPrivacy.sync(this.windowsWanted());
     this.statsTimer = setInterval(() => this.stats.save(), 60000);
     this.statsTimer.unref();
   }
@@ -216,6 +228,9 @@ export class App {
       this.settings.update({ parental: { safeSearch: false, blockAdult: false } });
       log.info('cleared leftover parental sub-options');
     }
+    if (from < 4 && this.settings.get().system.manageDns) {
+      this.notifications.push('info', 'Browsers now stay protected', 'AdHush turned off Secure DNS in your browsers so they can no longer skip ad blocking. You can change this in Settings.');
+    }
   }
 
   // 0.2: only ever switches lists on; afterwards they stay as the user leaves them.
@@ -233,6 +248,43 @@ export class App {
     if (!this.settings.get().https.enabled) {
       this.notifications.push('info', 'New: block YouTube ads', 'Open AdHush → Web filtering and click "Turn on" to also block ads inside web pages.');
     }
+  }
+
+  // Reported by the tray every few seconds while a full-screen game has focus. While active, the tray
+  // holds notifications and the service holds automatic updates (it reads <data>\gaming-active).
+  setGaming({ active, exe }) {
+    const g = this.settings.get().gaming;
+    const name = String(exe || '').trim().toLowerCase();
+    const file = path.join(this.dataDir, 'gaming-active');
+    if (!active || !g.enabled) {
+      this.gaming = null;
+      fs.rmSync(file, { force: true });
+      return this.gamingState();
+    }
+    // The name can be missing: some anti-cheat protected games refuse to tell us who they are.
+    const known = /^[\w .()+-]{1,120}\.exe$/.test(name);
+    this.gaming = { exe: known ? name : 'Full-screen game', at: Date.now() };
+    fs.writeFileSync(file, this.gaming.exe);
+    // Games and anti-cheat dislike filtered connections: in all-apps mode, leave this one alone.
+    const d = this.settings.get().https.driver;
+    if (known && d.mode === 'all' && !d.excluded.includes(name)) {
+      this.settings.update({ https: { driver: { excluded: [...d.excluded, name] } }, gaming: { games: [...new Set([...g.games, name])] } });
+      log.info(`gaming mode: left ${name} out of web filtering`);
+    }
+    return this.gamingState();
+  }
+
+  forgetGame(exe) {
+    const s = this.settings.get();
+    const name = String(exe || '').toLowerCase();
+    this.settings.update({ gaming: { games: s.gaming.games.filter((x) => x !== name) }, https: { driver: { excluded: s.https.driver.excluded.filter((x) => x !== name) } } });
+  }
+
+  gamingState() {
+    const g = this.settings.get().gaming;
+    // A tray that stops reporting (closed, crashed) must not leave the mode stuck on.
+    const active = !!this.gaming && Date.now() - this.gaming.at < 2 * 60 * 1000;
+    return { enabled: g.enabled, active, exe: active ? this.gaming.exe : null, games: g.games };
   }
 
   // Written by the service's updater; absent when AdHush runs outside the service.
@@ -263,7 +315,9 @@ export class App {
       protection: { enabled: s.protection.enabled, pausedUntil: s.protection.pausedUntil, active: this.settings.isProtectionActive() },
       dns: { listening: this.dns.listening, errors: this.dns.errors, ...this.resolver.info(), cache: this.cache.info() },
       engine: this.engineInfo,
-      filters: { enabled: this.filters.activeFilters().length, total: this.filters.filters.length },      onboarded: s.ui.onboarded,
+      filters: { enabled: this.filters.activeFilters().length, total: this.filters.filters.length },
+      onboarded: s.ui.onboarded,
+      gaming: this.gamingState(),
       // Written by setup after it trusts this PC's root certificate; web filtering is unsafe without it.
       caInstalled: fs.existsSync(path.join(this.dataDir, 'ca', 'installed-thumbprint')),
       extensionDir: EXTENSION_DIR,

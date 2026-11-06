@@ -3,7 +3,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { writeFileAtomic } from './fsutil.js';
 
-export const THEMES = ['midnight', 'sand', 'ember', 'raspberry', 'auto'];
+export const THEMES = ['obsidian', 'midnight', 'sand', 'ember', 'raspberry', 'auto'];
 export const BLOCKING_MODES =['default', 'refused', 'nxdomain', 'unspecified', 'custom'];
 
 export const DEFAULTS = {
@@ -86,13 +86,17 @@ export const DEFAULTS = {
   queryLog: { enabled: true, size: 5000 },
   api: { host: '127.0.0.1', port: 8899 },
   // manageDns: the AdHush service points Windows DNS at AdHush (and restores it if AdHush stops answering).
-  system: { manageDns: false },
+  // stopSecureDns: keep browsers' Secure DNS from skipping AdHush (browserguard.js).
+  system: { manageDns: false, stopSecureDns: true },
+  // Gaming mode: while a full-screen game runs, hold notifications and updates (reported by the tray).
+  // games: programs the mode left out of all-apps filtering, so they can be listed and put back.
+  gaming: { enabled: true, games: [] },
   // Signed automatic updates, applied by the AdHush service (service/src/updater.rs).
   updates: { feedUrl: '', auto: true },
   // notifications: tray toasts; onboarded: the first-run wizard has been completed or skipped.
-  // theme: midnight | sand | ember | raspberry | auto (sand or midnight, following Windows)
+  // theme: obsidian | midnight | sand | ember | raspberry | auto (sand or obsidian, following Windows)
   // defaultsVersion: which release's recommended filter set this install has received (see App.upgradeDefaults).
-  ui: { theme: 'midnight', notifications: true, onboarded: false, defaultsVersion: 3 },
+  ui: { theme: 'obsidian', notifications: true, onboarded: false, defaultsVersion: 4 },
 };
 
 function isPlainObject(v) {
@@ -148,7 +152,7 @@ export class Settings extends EventEmitter {
       // Installs from before defaultsVersion existed got the 0.1 filter set.
       if (stored.ui?.defaultsVersion === undefined) this.data.ui.defaultsVersion = 1;
       // Themes before 0.2 were light / dark / auto.
-      const legacy = { light: 'sand', dark: 'midnight' }[this.data.ui.theme];
+      const legacy = { light: 'sand', dark: 'obsidian' }[this.data.ui.theme];
       if (legacy) this.data.ui.theme = legacy;
     } catch (e) {
       if (e.code !== 'ENOENT') throw new Error(`cannot read ${this.file}: ${e.message}`);

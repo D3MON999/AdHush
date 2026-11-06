@@ -24,6 +24,9 @@ const FIRST_CHECK: Duration = Duration::from_secs(120);
 const CHECK_EVERY: Duration = Duration::from_secs(6 * 3600);
 const MAX_SETUP_BYTES: u64 = 500 * 1024 * 1024;
 const TRAY_GRACE: Duration = Duration::from_secs(12);
+/// The tray refreshes <data>\gaming-active while a full-screen game runs; older than this means it's over.
+const GAMING_FRESH: Duration = Duration::from_secs(120);
+const GAMING_RETRY: Duration = Duration::from_secs(10 * 60);
 
 pub fn start(app: PathBuf, data: PathBuf, stop: Arc<AtomicBool>) {
     std::thread::spawn(move || run(&app, &data, &stop));
@@ -37,6 +40,10 @@ fn run(app: &Path, data: &Path, stop: &AtomicBool) {
     finish_previous(app, data);
     let mut next = Instant::now() + FIRST_CHECK;
     while !stop.load(Ordering::SeqCst) {
+        // An automatic update restarts AdHush: wait until the game is over. Asking in the app still works.
+        if Instant::now() >= next && gaming(data) {
+            next = Instant::now() + GAMING_RETRY;
+        }
         let asked = take_trigger(data, "update-check");
         let install_now = take_trigger(data, "update-install");
         if asked || install_now || Instant::now() >= next {
@@ -48,6 +55,10 @@ fn run(app: &Path, data: &Path, stop: &AtomicBool) {
         }
         std::thread::sleep(Duration::from_secs(3));
     }
+}
+
+fn gaming(data: &Path) -> bool {
+    std::fs::metadata(data.join("gaming-active")).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age < GAMING_FRESH)
 }
 
 fn take_trigger(data: &Path, name: &str) -> bool {

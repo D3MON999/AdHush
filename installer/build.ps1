@@ -53,7 +53,7 @@ Copy-Item -Recurse (Join-Path $root 'extension\*') (Join-Path $stage 'extension'
 
 # Setup helpers
 Copy-Item (Join-Path $root 'scripts\set-system-dns.ps1'), (Join-Path $root 'scripts\restore-system-dns.ps1'), (Join-Path $root 'scripts\restore-internet.ps1'), (Join-Path $root 'scripts\restore-internet.cmd') (Join-Path $stage 'scripts')
-Copy-Item (Join-Path $PSScriptRoot 'configure.mjs'), (Join-Path $PSScriptRoot 'post-install.ps1'), (Join-Path $PSScriptRoot 'pre-uninstall.ps1'), (Join-Path $PSScriptRoot 'stop-windivert.ps1') (Join-Path $stage 'installer')
+Copy-Item (Join-Path $PSScriptRoot 'configure.mjs'), (Join-Path $PSScriptRoot 'post-install.ps1'), (Join-Path $PSScriptRoot 'pre-uninstall.ps1'), (Join-Path $PSScriptRoot 'stop-windivert.ps1'), (Join-Path $PSScriptRoot 'restore-windows.mjs') (Join-Path $stage 'installer')
 # Remember the feed between builds so a plain rebuild keeps updates working.
 $feedFile = Join-Path $PSScriptRoot 'update-feed.txt'
 if ($FeedUrl) { Set-Content -NoNewline -Encoding ascii $feedFile $FeedUrl }

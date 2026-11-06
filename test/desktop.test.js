@@ -29,10 +29,10 @@ test('onboarding flag: new installs see the wizard, existing ones do not', () =>
   fs.rmSync(old, { recursive: true, force: true });
 });
 
-test('themes: Midnight Mint by default, old light/dark choices migrate', () => {
+test('themes: Obsidian by default, old light/dark choices migrate', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adhush-theme-'));
-  assert.equal(new Settings(dir).load().get().ui.theme, 'midnight');
-  for (const [old, now] of [['dark', 'midnight'], ['light', 'sand'], ['auto', 'auto']]) {
+  assert.equal(new Settings(dir).load().get().ui.theme, 'obsidian');
+  for (const [old, now] of [['dark', 'obsidian'], ['light', 'sand'], ['auto', 'auto'], ['midnight', 'midnight']]) {
     fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ ui: { theme: old } }));
     assert.equal(new Settings(dir).load().get().ui.theme, now);
   }

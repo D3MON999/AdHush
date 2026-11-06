@@ -1,15 +1,15 @@
-/* Same design tokens as the AdHush app (ui/app.css): Midnight Mint in dark mode, Sand in light. */
+/* Same design tokens as the AdHush app (ui/app.css): Obsidian in dark mode, Sand in light. */
 :root {
-  --bg: #0b0b0b; --panel-2: #161616; --text: #f0f0f0; --muted: #a3a3a3; --line: #222222; --line-strong: #353535;
-  --accent: #34d399; --accent-hover: #6ee7b7; --accent-ink: #022c1d; --accent-soft: #0d2a20; --accent-soft-ink: #a7f3d0;
-  --warn: #fbbf24; --warn-soft: #2e2106; --off: #8a8a8a; --danger: #f87171;
+  --bg: #0b0b0b; --panel-2: #141414; --text: #f2f2f2; --muted: #8f8f8f; --line: #1c1c1c; --line-strong: #2a2a2a;
+  --accent: #ffffff; --accent-hover: #dcdcdc; --accent-ink: #000000; --ok: #2ebd85; --ok-soft: #0f2a20; --ok-ink: #7ee2bd;
+  --warn: #ffb020; --warn-soft: #2e2106; --off: #777777; --danger: #f6465d;
   --ease: cubic-bezier(.2, .7, .3, 1);
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
   :root {
     --bg: #fffdf9; --panel-2: #f2ece2; --text: #2a211a; --muted: #665848; --line: #e5dccd; --line-strong: #d2c4ae;
-    --accent: #c2410c; --accent-hover: #9a3412; --accent-ink: #fff; --accent-soft: #fde3d4; --accent-soft-ink: #7c2d12;
+    --accent: #c2410c; --accent-hover: #9a3412; --accent-ink: #fff; --ok: #c2410c; --ok-soft: #fde3d4; --ok-ink: #7c2d12;
     --warn: #a16207; --warn-soft: #fef3c7; --off: #857868; --danger: #b91c1c;
     color-scheme: light;
   }
@@ -21,7 +21,7 @@ header svg { width: 24px; height: 24px; }
 header svg .mark-bg { fill: var(--accent); }
 header svg .mark-fg { fill: none; stroke: var(--accent-ink); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .pill { margin-left: auto; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: var(--panel-2); color: var(--off); }
-.pill.on { background: var(--accent-soft); color: var(--accent-soft-ink); }
+.pill.on { background: var(--ok-soft); color: var(--ok-ink); }
 .pill.paused { background: var(--warn-soft); color: var(--warn); }
 main { padding: 16px; }
 .site { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 12px 14px; background: var(--panel-2); border-radius: 12px; }
@@ -42,7 +42,7 @@ button.link:hover { background: var(--panel-2); }
 .switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; z-index: 1; }
 .switch span { position: absolute; inset: 0; border-radius: 24px; background: var(--line-strong); transition: background-color .2s var(--ease); }
 .switch span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / .25); transition: transform .2s var(--ease); }
-.switch input:checked + span { background: var(--accent); }
+.switch input:checked + span { background: var(--ok); }
 .switch input:checked + span::after { transform: translateX(18px); }
 .switch input:focus-visible + span { outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
 .switch input:disabled { cursor: not-allowed; }

@@ -1,6 +1,6 @@
 {
   "name": "adhush",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Personal system-wide ad and tracker blocker for Windows (DNS filtering engine, filter list manager, local web UI).",
   "type": "module",
   "main": "src/index.js",

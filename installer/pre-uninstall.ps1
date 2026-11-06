@@ -20,6 +20,9 @@ Get-Process adhush-core -ErrorAction SilentlyContinue | Stop-Process -Force
 # The WinDivert kernel driver stays loaded after adhush-core exits and locks bin\WinDivert64.sys.
 & (Join-Path $PSScriptRoot 'stop-windivert.ps1')
 
+# Registry changes (browser Secure DNS policies, Windows privacy switches) go back from their snapshot.
+& (Join-Path $AppDir 'node\node.exe') (Join-Path $PSScriptRoot 'restore-windows.mjs') --data $data
+
 $thumbFile = Join-Path $data 'ca\installed-thumbprint'
 if (Test-Path $thumbFile) {
     $thumb = (Get-Content -Raw $thumbFile).Trim()

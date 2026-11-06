@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 use tao::dpi::LogicalSize;
@@ -18,6 +18,7 @@ use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, 
 use wry::{WebContext, WebView, WebViewBuilder};
 
 const POLL: Duration = Duration::from_secs(5);
+const GAMING_REFRESH: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum State {
@@ -161,6 +162,62 @@ impl Api {
     }
 }
 
+/// Full-screen programs that are not games.
+const NOT_GAMES: [&str; 22] = [
+    "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe", "waterfox.exe", "librewolf.exe",
+    "vlc.exe", "mpv.exe", "mpc-hc64.exe", "potplayermini64.exe", "wmplayer.exe", "microsoft.media.player.exe",
+    "powerpnt.exe", "explorer.exe", "applicationframehost.exe", "msedgewebview2.exe", "adhush-tray.exe",
+    "zoom.exe", "ms-teams.exe", "obs64.exe",
+];
+
+/// Some("name.exe") while a game is full screen in front; Some("") if its name can't be read
+/// (protected by anti-cheat). Windows reports full-screen state; the name rules out videos in a browser.
+fn fullscreen_game() -> Option<String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW};
+    use windows_sys::Win32::UI::Shell::{QUNS_BUSY, QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState};
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId};
+    unsafe {
+        let mut state = 0;
+        if SHQueryUserNotificationState(&mut state) != 0 || !matches!(state, QUNS_BUSY | QUNS_RUNNING_D3D_FULL_SCREEN) {
+            return None;
+        }
+        // Windows reports "busy" for any full-screen window, so make sure it's the one in front.
+        let window = GetForegroundWindow();
+        let mut rect: RECT = std::mem::zeroed();
+        let mut monitor: MONITORINFO = std::mem::zeroed();
+        monitor.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if GetWindowRect(window, &mut rect) == 0 || GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &mut monitor) == 0 {
+            return None;
+        }
+        let m = monitor.rcMonitor;
+        if rect.left > m.left || rect.top > m.top || rect.right < m.right || rect.bottom < m.bottom {
+            return None;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(window, &mut pid);
+        if pid == 0 {
+            return None;
+        }
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return Some(String::new());
+        }
+        let mut path = [0u16; 1024];
+        let mut len = path.len() as u32;
+        let ok = QueryFullProcessImageNameW(process, 0, path.as_mut_ptr(), &mut len);
+        CloseHandle(process);
+        if ok == 0 {
+            return Some(String::new());
+        }
+        let full = String::from_utf16_lossy(&path[..len as usize]);
+        let exe = Path::new(&full).file_name()?.to_str()?.to_lowercase();
+        (!NOT_GAMES.contains(&exe.as_str())).then_some(exe)
+    }
+}
+
 fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
@@ -181,7 +238,20 @@ fn state_of(status: &Option<Value>) -> State {
 fn poller(dir: PathBuf, rx: mpsc::Receiver<Cmd>, proxy: EventLoopProxy<UserEvent>) {
     let mut api = Api::new(dir);
     let mut since: Option<u64> = None;
+    let mut game: Option<String> = None; // what the service was last told
+    let mut told = Instant::now();
+    let mut holding = false;
+    let mut held: Vec<Value> = Vec::new(); // notifications waiting for the game to end
     loop {
+        let now_playing = fullscreen_game();
+        // Report changes at once, and keep reminding the service while a game runs.
+        if now_playing != game || (game.is_some() && told.elapsed() >= GAMING_REFRESH) {
+            let body = json!({ "active": now_playing.is_some(), "exe": now_playing.clone().unwrap_or_default() });
+            // "active" is false if the user turned Gaming mode off: then nothing is held back.
+            holding = api.call("POST", "/api/gaming", Some(body)).is_some_and(|(_, v)| v["active"] == true);
+            game = now_playing;
+            told = Instant::now();
+        }
         match rx.recv_timeout(POLL) {
             Ok(cmd) => {
                 let (path, body) = match cmd {
@@ -216,12 +286,12 @@ fn poller(dir: PathBuf, rx: mpsc::Receiver<Cmd>, proxy: EventLoopProxy<UserEvent
             let last = v["last"].as_u64().unwrap_or(0);
             // First successful poll only syncs the cursor: never replay old events on start.
             if since.is_some() {
-                let items = v["items"].as_array().cloned().unwrap_or_default();
-                if !items.is_empty() {
-                    let _ = proxy.send_event(UserEvent::Notify(items));
-                }
+                held.extend(v["items"].as_array().cloned().unwrap_or_default());
             }
             since = Some(last);
+        }
+        if !holding && !held.is_empty() {
+            let _ = proxy.send_event(UserEvent::Notify(std::mem::take(&mut held)));
         }
     }
 }
@@ -544,6 +614,7 @@ fn main() {
     let log_item = MenuItem::with_id("log", "Filtering log", true, None);
     let stats_item = MenuItem::with_id("stats", "Statistics", true, None);
     let broken_item = MenuItem::with_id("broken", "A website isn't working…", true, None);
+    let check_item = MenuItem::with_id("check", "Check my protection", true, None);
     let restore_item = MenuItem::with_id("restore", "Restore normal internet…", true, None);
     let quit_item = MenuItem::with_id("quit", "Quit tray", true, None);
     let menu = Menu::new();
@@ -558,6 +629,7 @@ fn main() {
         &stats_item,
         &PredefinedMenuItem::separator(),
         &broken_item,
+        &check_item,
         &restore_item,
         &quit_item,
     ])
@@ -607,6 +679,7 @@ fn main() {
                 "log" => open("#/log", &mut ui),
                 "stats" => open("#/stats", &mut ui),
                 "broken" => open("#/home?fix", &mut ui),
+                "check" => open("#/check", &mut ui),
                 "protect" => {
                     // muda has already toggled the check mark; send the new state.
                     let _ = tx.send(Cmd::Protection(protect_item.is_checked()));

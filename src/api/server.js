@@ -15,6 +15,7 @@ import { appState, appPatch } from '../apps.js';
 import { collectDiagnostics } from '../diagnostics.js';
 import { siteHost, brokenSitePatch } from '../sites.js';
 import { installCertificate } from '../certsetup.js';
+import { runSelfTest } from '../selftest.js';
 import { logger } from '../log.js';
 
 const log = logger('api');
@@ -83,6 +84,9 @@ export class ApiServer {
         app.settings.update({ https: { enabled: true, driver: { enabled: true, mode: 'selected' } } });
         return { ok: true, thumbprint };
       }],
+      ['GET', '/api/selftest', () => runSelfTest(app)],
+      ['POST', '/api/gaming', (b) => app.setGaming(b)],
+      ['POST', '/api/gaming/forget', (b) => { app.forgetGame(b.exe); return app.gamingState(); }],
       ['GET', '/api/updates', () => app.updateState()],
       ['POST', '/api/updates/check', () => { app.requestUpdate('check'); return { ok: true }; }],
       ['POST', '/api/updates/install', () => { app.requestUpdate('install'); return { ok: true }; }],

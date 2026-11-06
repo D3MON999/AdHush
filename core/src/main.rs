@@ -102,7 +102,19 @@ async fn main() -> Result<()> {
     });
 
     let control = tokio::spawn(control::run(state.clone(), SocketAddr::from(([127, 0, 0, 1], args.control_port))));
-    let proxy = tokio::spawn(proxy::run(state.clone(), SocketAddr::from(([127, 0, 0, 1], args.port))));
+    let proxy_state = state.clone();
+    let proxy_addr = SocketAddr::from(([127, 0, 0, 1], args.port));
+    let proxy = tokio::spawn(async move {
+        let result = proxy::run(proxy_state.clone(), proxy_addr).await;
+        // Driver mode doesn't use this port, so another program holding it (Steam takes 8080) is harmless.
+        if proxy_state.config().driver_enabled {
+            if let Err(e) = &result {
+                log::warn!("manual proxy port {proxy_addr} unavailable, continuing in driver mode: {e}");
+            }
+            std::future::pending::<()>().await;
+        }
+        result
+    });
     if let Err(e) = state::reload(state.clone()).await {
         log::error!("initial rule load failed: {e:#}");
     }

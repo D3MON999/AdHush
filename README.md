@@ -200,7 +200,7 @@ The service checks `settings.updates.feedUrl` every 6 hours (Settings → Update
 
 One-time setup: `node scripts/release.mjs keygen` creates `keys/update-signing.pem`. **Back it up and never share it**: without it, installed copies can't be updated.
 Each release, with GitHub Releases as the host (any static HTTPS host works):
-1. Bump `version` in `package.json` (and `installer/adhush.rc`).
+1. Bump `version` in `package.json`, `extension/manifest.json`, `installer/adhush.rc` and the three `Cargo.toml` files.
 2. Build: `powershell -ExecutionPolicy Bypass -File installer/build.ps1 -FeedUrl https://github.com/<you>/<repo>/releases/latest/download/latest.json -Notes "What changed"`. The feed URL is remembered in `installer/update-feed.txt` for later builds.
 3. Publish the source: `powershell -ExecutionPolicy Bypass -File installer/publish-source.ps1` copies the audited source archive into the GitHub Desktop clone (`C:\dev\adhush-upload\AdHush`); then in GitHub Desktop, *Commit to main* and *Push origin*.
 4. On GitHub, *Releases → Draft a new release*, tag `v<version>` (no spaces), and attach the four files from `installer/output`: `AdHushSetup-<version>.exe`, `latest.json`, `latest.json.sig`, `AdHush-<version>-source.zip`. Keep *Set as the latest release* ticked.
@@ -210,8 +210,16 @@ Installed copies pick it up within 6 hours. Only copies installed from a setup b
 ### "A website isn't working"
 Overview → *A website not working?*, the tray menu, and the browser extension's popup all turn AdHush off for one site: it is added to the allowlist **and** the HTTPS exclusions (and recorded in `filtering.brokenSites`, so *Turn back on* removes exactly that).
 
-### Tray
-Shield icon coloured by state (teal on, amber paused, grey off, red service not running). Only one copy runs per Windows user; launching it again opens the existing window. Left-click opens the app window (WebView2, the same UI as the browser). Right-click menu: status, Open, Protection on/off, Pause 30 min / Resume, Filtering log, Statistics, Restore normal internet…, Quit. Toasts appear for filter updates, the end of a pause, DNS start failures and repeated web-filter crashes (switch them off under Settings → Tray notifications).
+### Browsers and Secure DNS
+Browsers with "Secure DNS" talk straight to their own resolver and would skip system-wide filtering. *Settings → Stop browsers skipping AdHush* (on by default, `src/browserguard.js`) keeps them on AdHush in two layers: a DNS layer always active while the switch is on (Firefox's `use-application-dns.net` canary answers NXDOMAIN, well-known DoH hostnames stop resolving, unless allowlisted), and browser policies set while whole-PC protection is on (`DnsOverHttpsMode=off` for Chrome, Edge and Brave, `DNSOverHTTPS\Enabled=0` for Firefox). Browsers then show "managed by your organization". Turning the switch or whole-PC protection off, or uninstalling, restores the previous values from a snapshot.
+
+### Check my protection
+Overview, the tray menu and Settings → Get help open a self-test (`src/selftest.js`, `GET /api/selftest`) that runs the real paths and explains each result: protection state, DNS listener, filter lists, upstream lookups, an ad server blocked through the local listener, whether Windows' own resolver really goes through AdHush (a random subdomain of `adhush-selftest.test` must answer `127.0.0.99`), browser policies, web filtering and updates.
+
+### Gaming mode
+The tray asks Windows whether a full-screen game is in front (`SHQueryUserNotificationState`; browsers, video players and presentations don't count). While one is, toasts wait until it ends and automatic updates are postponed (`<data>\gaming-active`, refreshed every 30 s, ignored once older than 2 minutes, so a closed tray can't leave it stuck). In *All apps* web filtering, the game is also left out of filtering, because anti-cheat dislikes intercepted connections; Settings → Gaming mode lists those games and can put them back. DNS blocking keeps working throughout. Turn it off in the same card.
+
+### TrayShield icon coloured by state (teal on, amber paused, grey off, red service not running). Only one copy runs per Windows user; launching it again opens the existing window. Left-click opens the app window (WebView2, the same UI as the browser). Right-click menu: status, Open, Protection on/off, Pause 30 min / Resume, Filtering log, Statistics, A website isn't working…, Check my protection, Restore normal internet…, Quit. Toasts appear for filter updates, the end of a pause, DNS start failures and repeated web-filter crashes (switch them off under Settings → Tray notifications).
 
 ### Browser extension (AdHush Assistant)
 The popup shows the protection state and has a per-site switch (adds or removes the site on the allowlist), Pause 30 min / Resume, Block element, and Open AdHush. *Block element* (also on the page's right-click menu) highlights elements under the mouse, lets you widen the choice to the parent, previews how many elements match, and saves a `site##selector` user rule.
@@ -227,7 +235,8 @@ To add it, use **Settings → Browser extension** in the AdHush window: it lists
 - **Web filtering (optional, advanced):** local per-PC root certificate, network and cosmetic rules, `removeparam`, scriptlets and `$redirect` resources, procedural and dynamic cosmetic filtering, popular extended rule syntaxes (`#$#`, `#%#`, `$removeheader`, `$cookie`, `$csp`), EV/pinned/invalid-certificate pass-through, per-app driver mode with QUIC blocking.
 - **Privacy:** tracking-protection presets (cookies, referrer, user agent, DNT/GPC, WebRTC/Push/Geolocation), anti-DPI, optional Windows privacy switches with snapshot/restore.
 - **Apps and extensions:** per-app filtering switches, userscripts and userstyles with a GM API.
-- **Themes:** Midnight Mint (default), Sand, Graphite & Ember, Raspberry, or match Windows (Settings → Appearance).
+- **Stays working:** stops browsers skipping AdHush via Secure DNS, "Check my protection" self-test, Gaming mode.
+- **Themes:** Obsidian (default), Midnight Mint, Sand, Graphite & Ember, Raspberry, or match Windows (Settings → Appearance).
 - **Desktop:** tray icon and window, notifications, first-run wizard, "website not working" switch, Windows service with DNS safety net, logs bundle, signed automatic updates, installer and clean uninstaller, browser companion extension (Chromium).
 - Not included on purpose: accounts, licensing, telemetry. DoQ and DNSCrypt upstreams are not supported yet.
 

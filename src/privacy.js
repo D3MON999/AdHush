@@ -35,6 +35,7 @@ export const URL_TRACKING_FILTER_ID = 111;
 // ---------- Windows privacy switches ----------
 
 const DWORD = 'REG_DWORD';
+const SZ = 'REG_SZ';
 export const WINDOWS_TWEAKS = {
   telemetry: {
     label: 'Limit Windows diagnostic data (telemetry)',
@@ -61,6 +62,17 @@ export const WINDOWS_TWEAKS = {
   feedback: {
     label: 'Stop Windows feedback prompts',
     values: [{ key: 'HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\DataCollection', name: 'DoNotShowFeedbackNotifications', type: DWORD, data: '1' }],
+  },
+  // Not a user-facing privacy switch: driven by settings.system (see browserguard.js and App.windowsWanted).
+  browserDoh: {
+    label: 'Keep browsers from skipping AdHush with Secure DNS',
+    internal: true,
+    values: [
+      { key: 'HKLM\\SOFTWARE\\Policies\\Google\\Chrome', name: 'DnsOverHttpsMode', type: SZ, data: 'off' },
+      { key: 'HKLM\\SOFTWARE\\Policies\\Microsoft\\Edge', name: 'DnsOverHttpsMode', type: SZ, data: 'off' },
+      { key: 'HKLM\\SOFTWARE\\Policies\\BraveSoftware\\Brave', name: 'DnsOverHttpsMode', type: SZ, data: 'off' },
+      { key: 'HKLM\\SOFTWARE\\Policies\\Mozilla\\Firefox\\DNSOverHTTPS', name: 'Enabled', type: DWORD, data: '0' },
+    ],
   },
 };
 
@@ -154,7 +166,7 @@ export class WindowsPrivacy {
   }
 
   status(wanted) {
-    return Object.fromEntries(Object.entries(WINDOWS_TWEAKS).map(([id, t]) => [id, {
+    return Object.fromEntries(Object.entries(WINDOWS_TWEAKS).filter(([, t]) => !t.internal).map(([id, t]) => [id, {
       label: t.label, wanted: !!wanted?.[id], applied: !!this.state.snapshots[id], error: this.errors[id] || null,
     }]));
   }
