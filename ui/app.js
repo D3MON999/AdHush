@@ -536,7 +536,7 @@ views.privacy = async () => {
 };
 
 views.apps = async (params) => {
-  const showInstalled = params.get('installed') === '1';
+  const showInstalled = params.get('installed') !== '0';
   let data = null;
   const render = () => {
     const q = ($('#ap-q')?.value || '').toLowerCase();
@@ -562,7 +562,7 @@ views.apps = async (params) => {
     </div><div id="ap-note" class="hint" style="margin-top:8px"></div></div>
     <div class="card"><table><thead><tr><th>App</th><th>Activity</th><th class="num">Requests</th><th class="num">Blocked</th><th>Filter</th><th>HTTPS</th></tr></thead>
       <tbody id="ap-rows"><tr><td colspan="6" class="empty">Loading apps…</td></tr></tbody></table></div>`;
-  $('#ap-inst').onchange = (e) => { location.hash = e.target.checked ? '#/apps?installed=1' : '#/apps'; };
+  $('#ap-inst').onchange = (e) => { location.hash = e.target.checked ? '#/apps' : '#/apps?installed=0'; };
   $('#ap-q').oninput = () => data && render();
   $('#ap-add-btn').onclick = () => {
     const exe = $('#ap-add').value.trim().toLowerCase();
