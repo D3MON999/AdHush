@@ -141,7 +141,7 @@ views.home = async (params) => {
           <div class="launch-title">${{ on: 'Protection is on', off: 'Protection is off', paused: 'Protection is paused' }[state]}</div>
           <div class="launch-desc">Blocks ads, trackers, malware and phishing.</div>
           <div class="row launch-actions">
-            ${state === 'on' ? '<button data-pause="5">Pause 5 min</button><button data-pause="30">30 min</button><button data-pause="60">1 h</button>' : ''}
+            ${state === 'on' ? '<span class="pause-label">Pause for</span><button data-pause="5">5 min</button><button data-pause="30">30 min</button><button data-pause="60">1 h</button>' : ''}
             ${state === 'paused' ? '<button id="resume">Resume now</button>' : ''}
           </div>
         </div>
@@ -150,7 +150,7 @@ views.home = async (params) => {
         ${tile('privacy', 'Tracking protection', s.privacy.enabled ? `${s.privacy.preset[0].toUpperCase()}${s.privacy.preset.slice(1)} preset` : 'Off')}
         ${tile('log', 'Query log', 'Live requests from this PC')}
         ${tile('apps', 'Apps', 'Choose what gets filtered')}
-        ${tile('browser', 'Browser extension', 'Site switch and element blocking')}
+        ${tile('browser', 'Browser extension', 'Block page elements')}
       </div>
       <div class="panels">
         <div class="card panel"><div class="panel-head"><span>Last 24 hours</span><span>Blocked requests</span></div>
@@ -323,7 +323,7 @@ views.https = async () => {
     const canSetup = !installed && appStatus.systemDns?.guard;
     const c = st.core;
     const state = !h.enabled ? 'off' : c ? 'on' : 'paused';
-    const title = !h.enabled ? 'Web filtering is off' : c ? `Proxy running on 127.0.0.1:${c.proxyPort}` : st.lastError || 'Starting…';
+    const title = !h.enabled ? 'Web filtering is off' : c?.driver?.running ? 'Web filtering is on' : c ? `Proxy running on 127.0.0.1:${c.proxyPort}` : st.lastError || 'Starting…';
     const t = c?.stats || {};
     view.innerHTML = `
       <h1>Web filtering</h1><p class="sub">HTTPS-aware filtering: blocks ad and tracker requests, hides page elements, strips tracking parameters.</p>
@@ -443,7 +443,7 @@ views.https = async () => {
     if (!$('#h-rows')) return;
     const { items } = await api('GET', '/api/https/log?limit=150');
     $('#h-rows').innerHTML = items.length ? items.map((e) => `<tr>
-        <td class="hint">${new Date(e.time).toLocaleTimeString()}</td>
+        <td class="hint nowrap">${new Date(e.time).toLocaleTimeString()}</td>
         <td class="mono">${esc(e.url)}</td><td>${esc(e.type)}</td>
         <td><span class="badge ${ACTION_BADGE[e.action] || ''}">${esc(e.action)}</span></td>
         <td class="mono">${esc(e.rule || '')}</td><td class="num">${e.status || ''}</td></tr>`).join('')
@@ -714,12 +714,12 @@ views.log = async () => {
     const { items } = await api('GET', `/api/log?limit=300&search=${encodeURIComponent($('#q').value)}&status=${$('#st').value}`);
     $('#rows').innerHTML = items.length ? items.map((e) => `
       <tr>
-        <td class="hint">${new Date(e.time).toLocaleTimeString()}</td>
+        <td class="hint nowrap">${new Date(e.time).toLocaleTimeString()}</td>
         <td class="mono">${esc(e.name)}${e.company ? ` <span class="badge">${esc(e.company)}</span>` : ''}${e.cname ? `<div class="hint">via CNAME ${esc(e.cname)}</div>` : ''}</td>
         <td>${esc(e.type)}</td>
         <td><span class="badge ${esc(e.status)}">${esc(e.status)}</span>${e.cached ? ' <span class="badge">cache</span>' : ''}</td>
         <td class="mono">${e.rule ? `${esc(e.rule)}<div class="hint">${esc(e.filterName)}</div>` : esc((e.answers || []).join(', ') || e.rcode || e.error || '')}</td>
-        <td class="mono">${esc(e.client)}</td>
+        <td class="mono nowrap">${esc(e.client)}</td>
         <td class="num">${e.ms}</td>
         <td>${e.status === 'blocked' ? `<button class="small" data-allow="${esc(e.name)}">Unblock</button>` : `<button class="small" data-block="${esc(e.name)}">Block</button>`}</td>
       </tr>`).join('') : '<tr><td colspan="8" class="empty">No requests yet</td></tr>';
@@ -740,7 +740,7 @@ views.stats = async (params) => {
   const max = Math.max(1, ...s.series.map((p) => p.total));
   const list = (items, title) => `<div class="card"><h2>${title}</h2>${items.length ? `<ul class="list">${items.map((d) => `<li><span class="name">${esc(d.filter || d.name)}</span><span>${fmt(d.count)}</span></li>`).join('')}</ul>` : '<div class="empty">No data</div>'}</div>`;
   const table = (title, rows, empty) => `<div class="card"><h2>${title}</h2>${rows.length ? `<table><thead><tr><th>Name</th><th class="num">Requests</th><th class="num">Blocked</th></tr></thead><tbody>
-      ${rows.map((r) => `<tr><td>${esc(r.name)}${r.category ? `<div class="hint">${esc(r.category.replace(/_/g, ' '))}</div>` : ''}</td><td class="num">${fmt(r.requests)}</td><td class="num">${fmt(r.blocked)}</td></tr>`).join('')}</tbody></table>` : `<div class="empty">${empty}</div>`}</div>`;
+      ${rows.map((r) => `<tr><td>${esc(r.name.replace(/_/g, ' '))}${r.category ? `<div class="hint">${esc(r.category.replace(/_/g, ' '))}</div>` : ''}</td><td class="num">${fmt(r.requests)}</td><td class="num">${fmt(r.blocked)}</td></tr>`).join('')}</tbody></table>` : `<div class="empty">${empty}</div>`}</div>`;
   const appRows = apps.apps.filter((a) => a.requests).sort((a, b) => b.requests - a.requests).slice(0, 15).map((a) => ({ name: a.name, requests: a.requests, blocked: a.blocked }));
   view.innerHTML = `
     <h1>Statistics</h1>
