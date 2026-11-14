@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { logger } from './log.js';
 import { writeFileAtomic } from './fsutil.js';
+import { httpGet } from './httpget.js';
 
 const log = logger('userscripts');
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -135,7 +136,7 @@ export class UserscriptManager extends EventEmitter {
 
   async fetchText(url) {
     if (!/^https?:\/\//i.test(url)) throw err(400, 'only http(s) URLs can be installed');
-    const res = await fetch(url, { headers: { 'user-agent': 'AdHush' }, redirect: 'follow', signal: AbortSignal.timeout(60000) });
+    const res = await httpGet(url, { headers: { 'user-agent': 'AdHush' }, timeoutMs: 60000, maxBytes: MAX_BYTES }).catch((e) => { throw err(400, `download failed: ${e.message}`); });
     if (!res.ok) throw err(400, `download failed: HTTP ${res.status}`);
     const text = await res.text();
     if (text.length > MAX_BYTES) throw err(400, 'file is larger than 5 MB');

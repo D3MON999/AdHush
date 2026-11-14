@@ -73,6 +73,16 @@ export async function handle(msg, call) {
       await call('POST', '/api/sites/broken', { host, broken: msg.broken !== false });
       return { ok: true };
     }
+    case 'blocked': {
+      // Which of the sites a page contacted does AdHush block? The extension sends host names only.
+      const hosts = [...new Set((Array.isArray(msg.hosts) ? msg.hosts : []).map((h) => String(h).trim().toLowerCase()))]
+        .filter((h) => h.length <= 253 && /^[a-z0-9.-]+\.[a-z0-9-]+$/.test(h)).slice(0, 150);
+      const results = await Promise.all(hosts.map((h) => call('GET', `/api/check?name=${encodeURIComponent(h)}`).catch((e) => e)));
+      // If AdHush couldn't answer at all, say so instead of claiming nothing was blocked.
+      const firstError = results.find((r) => r instanceof Error);
+      if (firstError && results.every((r) => r instanceof Error)) throw firstError;
+      return { ok: true, blocked: results.filter((r) => r && r.action === 'block').map((r) => ({ host: r.name, filter: r.filterName, rule: r.rule })) };
+    }
     case 'ui':
       return { ok: true, url: `${call.base}/` };
     default:

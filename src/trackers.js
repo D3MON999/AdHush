@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { logger } from './log.js';
 import { writeFileAtomic } from './fsutil.js';
+import { httpGet } from './httpget.js';
 
 const log = logger('trackers');
 const BASE = 'https://raw.githubusercontent.com/AdguardTeam/companiesdb/main/dist/';
@@ -41,7 +42,7 @@ export class TrackerDb {
 
   async update() {
     const get = async (name) => {
-      const res = await fetch(BASE + name, { headers: { 'user-agent': 'AdHush' }, signal: AbortSignal.timeout(60000) });
+      const res = await httpGet(BASE + name, { headers: { 'user-agent': 'AdHush' }, timeoutMs: 60000 });
       if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
       return res.json();
     };

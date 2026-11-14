@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { App } from './app.js';
 import { configureLogger, logger } from './log.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+// Node gives each address only 250 ms to connect before trying the next; some list servers take longer
+// from far away, so downloads failed at random. 2.5 s per address is still quick when one is down.
+net.setDefaultAutoSelectFamilyAttemptTimeout(2500);
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 
 function parseArgs(argv) {

@@ -170,11 +170,35 @@ const NOT_GAMES: [&str; 22] = [
     "zoom.exe", "ms-teams.exe", "obs64.exe",
 ];
 
+/// The file name of a running program, from a snapshot of the process list (no handle to the program).
+fn process_name(pid: u32) -> Option<String> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut found = None;
+        let mut more = Process32FirstW(snap, &mut entry) != 0;
+        while more {
+            if entry.th32ProcessID == pid {
+                let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+                found = Some(String::from_utf16_lossy(&entry.szExeFile[..len]));
+                break;
+            }
+            more = Process32NextW(snap, &mut entry) != 0;
+        }
+        CloseHandle(snap);
+        found.filter(|name| !name.is_empty())
+    }
+}
+
 /// Some("name.exe") while a game is full screen in front; Some("") if its name can't be read
-/// (protected by anti-cheat). Windows reports full-screen state; the name rules out videos in a browser.
+/// (it has already exited). Windows reports full-screen state; the name rules out videos in a browser.
 fn fullscreen_game() -> Option<String> {
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW};
     use windows_sys::Win32::UI::Shell::{QUNS_BUSY, QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState};
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
@@ -201,19 +225,12 @@ fn fullscreen_game() -> Option<String> {
         if pid == 0 {
             return None;
         }
-        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if process.is_null() {
-            return Some(String::new());
-        }
-        let mut path = [0u16; 1024];
-        let mut len = path.len() as u32;
-        let ok = QueryFullProcessImageNameW(process, 0, path.as_mut_ptr(), &mut len);
-        CloseHandle(process);
-        if ok == 0 {
-            return Some(String::new());
-        }
-        let full = String::from_utf16_lossy(&path[..len as usize]);
-        let exe = Path::new(&full).file_name()?.to_str()?.to_lowercase();
+        // Read the name from Windows' list of running programs, the same list Task Manager shows,
+        // so AdHush never opens the game process itself.
+        let exe = match process_name(pid) {
+            Some(name) => name.to_lowercase(),
+            None => return Some(String::new()),
+        };
         (!NOT_GAMES.contains(&exe.as_str())).then_some(exe)
     }
 }
@@ -436,13 +453,13 @@ fn desktop_dir() -> PathBuf {
     PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default()).join("Desktop")
 }
 
-/// Downloads the diagnostics zip from the service and saves it on the Desktop.
-fn save_diagnostics(dir: &Path) -> Result<PathBuf, String> {
+/// Downloads a file the service makes (logs zip, settings backup) and saves it on the Desktop.
+fn save_from_api(dir: &Path, endpoint: &str, fallback_name: &str) -> Result<PathBuf, String> {
     let mut api = Api::new(dir.to_path_buf());
     let token = api.token().ok_or("AdHush is not installed (no API token)")?;
     let mut res = api
         .agent
-        .get(&format!("{}/api/diagnostics", api.base))
+        .get(&format!("{}{endpoint}", api.base))
         .header("x-adhush-token", &token)
         .call()
         .map_err(|_| "AdHush is not running".to_string())?;
@@ -455,7 +472,8 @@ fn save_diagnostics(dir: &Path) -> Result<PathBuf, String> {
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.split("filename=\"").nth(1))
         .map(|v| v.trim_end_matches('"').to_string())
-        .unwrap_or_else(|| "AdHush-logs.zip".into());
+        .filter(|v| !v.is_empty() && !v.contains(['/', '\\', ':']))
+        .unwrap_or_else(|| fallback_name.into());
     let bytes = res.body_mut().with_config().limit(200 * 1024 * 1024).read_to_vec().map_err(|e| e.to_string())?;
     let path = desktop_dir().join(name);
     std::fs::write(&path, bytes).map_err(|e| format!("could not write {}: {e}", path.display()))?;
@@ -492,10 +510,15 @@ fn restore_internet() {
 fn handle_ipc(msg: &str, base: &str, dir: &Path, proxy: &EventLoopProxy<UserEvent>) -> Option<Value> {
     let req: Value = serde_json::from_str(msg).unwrap_or(Value::Null);
     let id = req["id"].clone();
-    if req["cmd"] == "saveDiagnostics" {
+    let download = match req["cmd"].as_str() {
+        Some("saveDiagnostics") => Some(("/api/diagnostics", "AdHush-logs.zip")),
+        Some("saveBackup") => Some(("/api/backup", "AdHush-backup.json")),
+        _ => None,
+    };
+    if let Some((endpoint, name)) = download {
         let (dir, proxy) = (dir.to_path_buf(), proxy.clone());
         std::thread::spawn(move || {
-            let reply = match save_diagnostics(&dir) {
+            let reply = match save_from_api(&dir, endpoint, name) {
                 Ok(p) => json!({ "ok": true, "file": p.display().to_string() }),
                 Err(e) => json!({ "ok": false, "error": e }),
             };

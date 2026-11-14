@@ -164,6 +164,9 @@ class DohConnection {
     });
     session.on('error', (e) => log.debug(`DoH session ${this.host} error: ${e.message}`));
     session.on('close', () => { if (this.session === session) this.session = null; });
+    // After GOAWAY the server takes no new requests: start a fresh session for the next query and let
+    // requests already in flight finish on this one.
+    session.on('goaway', () => { if (this.session === session) this.session = null; });
     session.setTimeout(60000, () => session.close());
     this.session = session;
     return session;
@@ -255,8 +258,9 @@ export class Upstream {
     return { ip, conn: this.conn };
   }
 
-  async exchangeOnce(query) {
+  async exchangeOnce(query, used = {}) {
     const { ip, conn } = await this.connection();
+    used.conn = conn;
     if (conn) return conn.exchange(query, this.timeoutMs);
     if (this.cfg.proto === 'tcp') return tcpExchange(ip, this.cfg.port, query, this.timeoutMs);
     const res = await udpExchange(ip, this.cfg.port, query, this.timeoutMs);
@@ -268,12 +272,17 @@ export class Upstream {
     const started = Date.now();
     try {
       let res;
+      const used = {};
       try {
-        res = await this.exchangeOnce(query);
+        res = await this.exchangeOnce(query, used);
       } catch (e) {
-        if (!this.conn || e.code === 'ETIMEDOUT') throw e;
-        this.conn.close(); // stale persistent connection: retry once on a fresh one
-        this.conn = null;
+        if (!used.conn || e.code === 'ETIMEDOUT') throw e;
+        // Stale persistent connection: retry once on a fresh one. Only drop the connection this query
+        // used; another query may already have replaced it, and closing that would fail its lookups.
+        if (this.conn === used.conn) {
+          this.conn.close();
+          this.conn = null;
+        }
         res = await this.exchangeOnce(query);
       }
       this.stats.ok++;
@@ -297,8 +306,20 @@ export class Upstream {
   }
 }
 
+// While secure DNS is unreachable but the network's own DNS answers (hotel or café Wi-Fi before you
+// sign in), lookups go to the network's DNS first and secure DNS is retried every PROBE_MS.
+const NETWORK_HOLD_MS = 2 * 60 * 1000;
+const PROBE_MS = 15000;
+const NETWORK_TIMEOUT_MS = 2500;
+
 export class Resolver {
-  constructor(dns) {
+  // networkDns: async () => [ip], the network's own DNS servers. onNetworkMode(on): called when the
+  // resolver starts or stops relying on them.
+  constructor(dns, { networkDns = null, onNetworkMode = () => {} } = {}) {
+    this.networkDns = networkDns;
+    this.onNetworkMode = onNetworkMode;
+    this.networkUntil = 0;
+    this.nextProbe = 0;
     const opts = { bootstrap: dns.bootstrap, timeoutMs: dns.timeoutMs };
     const build = (list) => list.flatMap((spec) => {
       try {
@@ -317,7 +338,50 @@ export class Resolver {
     return Promise.any(list.map((u) => u.exchange(query).then((response) => ({ response, upstream: u.label }))));
   }
 
+  get usingNetwork() {
+    return Date.now() < this.networkUntil;
+  }
+
+  async viaNetwork(query) {
+    const servers = this.networkDns ? await this.networkDns() : [];
+    if (!servers.length) throw new Error('no network DNS servers');
+    return Promise.any(servers.map((ip) => udpExchange(ip, 53, query, NETWORK_TIMEOUT_MS).then((response) => ({ response, upstream: `network ${ip}` }))));
+  }
+
+  setNetworkMode(on) {
+    const was = this.usingNetwork;
+    this.networkUntil = on ? Date.now() + NETWORK_HOLD_MS : 0;
+    if (was !== on) this.onNetworkMode(on);
+  }
+
   async resolve(query) {
+    if (this.usingNetwork) {
+      if (Date.now() >= this.nextProbe) {
+        this.nextProbe = Date.now() + PROBE_MS;
+        // Is secure DNS reachable again? Checked in the background so this lookup isn't slowed down.
+        this.resolveSecure(query).then(() => this.setNetworkMode(false), () => this.setNetworkMode(true));
+      }
+      try {
+        return await this.viaNetwork(query);
+      } catch {
+        // fall through to the normal path
+      }
+    }
+    try {
+      return await this.resolveSecure(query);
+    } catch (e) {
+      try {
+        const res = await this.viaNetwork(query);
+        this.nextProbe = Date.now() + PROBE_MS;
+        this.setNetworkMode(true);
+        return res;
+      } catch {
+        throw e;
+      }
+    }
+  }
+
+  async resolveSecure(query) {
     const errors = [];
     if (this.upstreams.length) {
       try {
@@ -344,7 +408,7 @@ export class Resolver {
   }
 
   info() {
-    return { upstreams: this.upstreams.map((u) => u.info()), fallbacks: this.fallbacks.map((u) => u.info()) };
+    return { upstreams: this.upstreams.map((u) => u.info()), fallbacks: this.fallbacks.map((u) => u.info()), usingNetworkDns: this.usingNetwork };
   }
 
   close() {

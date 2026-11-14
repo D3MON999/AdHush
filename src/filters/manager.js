@@ -8,6 +8,7 @@ import { CATALOG, CUSTOM_ID_START } from './catalog.js';
 import { parseList } from '../rules/parser.js';
 import { logger } from '../log.js';
 import { writeFileAtomic } from '../fsutil.js';
+import { httpGet } from '../httpget.js';
 
 const log = logger('filters');
 const MAX_BYTES = 64 * 1024 * 1024;
@@ -136,7 +137,15 @@ export class FilterManager extends EventEmitter {
       if (f.etag) headers['if-none-match'] = f.etag;
       if (f.lastModified) headers['if-modified-since'] = f.lastModified;
     }
-    const res = await fetch(f.url, { headers, redirect: 'follow', signal: AbortSignal.timeout(90000) });
+    const get = () => httpGet(f.url, { headers, maxBytes: MAX_BYTES });
+    let res;
+    try {
+      res = await get();
+    } catch {
+      // One retry after a short wait: a single dropped connection shouldn't cost a day of updates.
+      await new Promise((r) => setTimeout(r, 3000));
+      res = await get();
+    }
     if (res.status === 304) return { notModified: true };
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const len = Number(res.headers.get('content-length') || 0);
@@ -171,7 +180,7 @@ export class FilterManager extends EventEmitter {
         continue;
       }
       try {
-        const res = await fetch(target, { headers: { 'user-agent': userAgent }, redirect: 'follow', signal: AbortSignal.timeout(90000) });
+        const res = await httpGet(target.href, { headers: { 'user-agent': userAgent }, maxBytes: MAX_BYTES });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         out.push(`! >>> included from ${target.href}`, await this.expandIncludes(await res.text(), res.url || target.href, userAgent, depth + 1));
       } catch (e) {

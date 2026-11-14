@@ -25,6 +25,8 @@
 - **You can check it works.** One click runs real tests and explains the results in plain English.
 - **Browsers can't skip it.** "Secure DNS" can quietly bypass ad blocking, so AdHush stops that in Chrome, Edge, Brave and Firefox.
 - **Quiet while you play.** Notifications and updates wait until your full-screen game is over.
+- **Light on memory.** About 200 MB with the full default protection, so older laptops keep up.
+- **Works on hotel Wi-Fi.** Sign-in pages load, and AdHush keeps blocking ads while you connect.
 - **Nothing extra.** There are no accounts, ads or telemetry, and it's free and open source.
 
 ## What it does
@@ -56,7 +58,9 @@
   </tr>
 </table>
 
-There's more in the app: custom filter lists, your own rules, allow and block lists, encrypted DNS, userscripts and a browser extension for Chromium browsers. Safe search and adult-site blocking are there too, off until you want them.
+The browser extension shows what was blocked on the page you're on, and lets you allow any of it in one click. AdHush also checks itself every few hours and only speaks up if something breaks, like a VPN taking over.
+
+There's more in the app: settings backup, custom filter lists, your own rules, allow and block lists, encrypted DNS, userscripts and a browser extension for Chromium browsers. Safe search and adult-site blocking are there too, off until you want them.
 
 ## Safe by design
 

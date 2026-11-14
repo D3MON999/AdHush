@@ -146,3 +146,33 @@ test('self-test reports a paused PC honestly and never says all clear', async (t
   assert.equal(report.checks.find((c) => c.id === 'protection').fix.action, 'resume');
   assert.ok(!report.checks.some((c) => c.id === 'blocking'), 'cannot claim blocking while off');
 });
+
+test('background check speaks up once per problem, and again only if it comes back', async (t) => {
+  const app = makeApp(t);
+  let checks = [{ id: 'wholepc', name: 'Whole-PC protection', status: 'warn', detail: 'A VPN took over.' }];
+  app.selfTest = async () => ({ result: 'warn', checks });
+  const titles = () => app.notifications.since(0).items.map((n) => n.title);
+  await app.backgroundCheck();
+  await app.backgroundCheck();
+  assert.deepEqual(titles(), ['Whole-PC protection needs a look']);
+  checks = [];
+  await app.backgroundCheck();
+  checks = [{ id: 'wholepc', name: 'Whole-PC protection', status: 'warn', detail: 'A VPN took over.' }];
+  await app.backgroundCheck();
+  assert.equal(titles().length, 2);
+  clearTimeout(app.checkTimer);
+});
+
+test('background check ignores choices the user made and can be switched off', async (t) => {
+  const app = makeApp(t);
+  app.selfTest = async () => ({ result: 'fail', checks: [
+    { id: 'protection', name: 'Protection', status: 'fail', detail: 'off' },
+    { id: 'browsers', name: 'Browsers', status: 'warn', detail: 'Secure DNS allowed' },
+  ] });
+  await app.backgroundCheck();
+  app.settings.update({ system: { backgroundCheck: false } });
+  app.selfTest = async () => ({ result: 'fail', checks: [{ id: 'listener', name: 'DNS filter', status: 'fail', detail: 'down' }] });
+  await app.backgroundCheck();
+  assert.equal(app.notifications.since(0).items.length, 0);
+  clearTimeout(app.checkTimer);
+});

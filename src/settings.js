@@ -87,7 +87,8 @@ export const DEFAULTS = {
   api: { host: '127.0.0.1', port: 8899 },
   // manageDns: the AdHush service points Windows DNS at AdHush (and restores it if AdHush stops answering).
   // stopSecureDns: keep browsers' Secure DNS from skipping AdHush (browserguard.js).
-  system: { manageDns: false, stopSecureDns: true },
+  // backgroundCheck: run the self-test every few hours and warn only when something breaks.
+  system: { manageDns: false, stopSecureDns: true, backgroundCheck: true },
   // Gaming mode: while a full-screen game runs, hold notifications and updates (reported by the tray).
   // games: programs the mode left out of all-apps filtering, so they can be listed and put back.
   gaming: { enabled: true, games: [] },

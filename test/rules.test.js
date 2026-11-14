@@ -77,3 +77,26 @@ test('parseList counts rules and skips comments', () => {
   const { rules } = parseList('! Title: x\n# comment\n||a.com^\n0.0.0.0 b.com c.com\nsite.com##.ad\n');
   assert.equal(rules.length, 3);
 });
+
+test('compact storage gives the same answers as full rule objects', () => {
+  const text = [
+    '||ads.com^', 'tracker.net', '0.0.0.0 pixel.org', '127.0.0.1 local.ads', ':: v6.ads', '|exact.com^',
+    '||ads.com^$important', '@@||ok.ads.com^', '||rw.com^$dnsrewrite=1.2.3.4', '10.0.0.5 nas.lan',
+    '||typed.com^$dnstype=AAAA', '||odd.com^|', '/^re[0-9]+\\.com$/', '||bad.com^', '||bad.com^$badfilter',
+  ].join('\n');
+  const sources = [{ filterId: 7, text }, { filterId: -1, text: '||ads.com^\n||user.com^' }];
+  const compact = RuleEngine.build(sources);
+  const full = RuleEngine.build(sources, { compact: false });
+  assert.equal(compact.count, full.count);
+  const hosts = ['ads.com', 'x.ads.com', 'ok.ads.com', 'tracker.net', 'a.tracker.net', 'pixel.org', 'local.ads', 'v6.ads', 'exact.com', 'sub.exact.com',
+    'rw.com', 'nas.lan', 'typed.com', 'odd.com', 're42.com', 'bad.com', 'user.com', 'clean.org'];
+  for (const host of hosts) for (const qtype of [1, 28]) {
+    const a = compact.match(host, { qtype });
+    const b = full.match(host, { qtype });
+    assert.equal(a.action, b.action, host);
+    assert.deepEqual(a.rule, b.rule, host);
+    assert.deepEqual(a.rewrite, b.rewrite, host);
+  }
+  assert.ok(typeof compact.suffix.get('tracker.net') === 'number', 'plain rules are packed');
+  assert.equal(compact.match('local.ads').rule.text, '127.0.0.1 local.ads');
+});

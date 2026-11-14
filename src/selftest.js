@@ -78,7 +78,9 @@ export async function runSelfTest(app) {
   add('lists', 'Filter lists', app.engine.count > 0 ? { status: 'ok', detail: `${app.engine.count.toLocaleString()} blocking rules loaded from ${app.filters.activeFilters().length} lists.` }
     : { status: 'fail', detail: 'No blocking rules are loaded yet. The lists may still be downloading.', fix: { href: '#/filters', label: 'Open Filters' } });
 
-  add('upstream', 'Internet lookups', await checkUpstreams(app));
+  const upstream = await checkUpstreams(app);
+  add('upstream', 'Internet lookups', upstream.status === 'ok' || !app.resolver.usingNetwork ? upstream
+    : { status: 'warn', detail: "Secure DNS can't be reached, so AdHush is using this network's own DNS. Ads are still blocked. If this is hotel or café Wi-Fi, sign in to it in your browser." });
 
   if (port && active) {
     try {

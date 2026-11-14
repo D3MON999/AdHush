@@ -13,6 +13,7 @@ import { Upstream } from '../dns/upstream.js';
 import { PRESETS, URL_TRACKING_FILTER_ID } from '../privacy.js';
 import { appState, appPatch } from '../apps.js';
 import { collectDiagnostics } from '../diagnostics.js';
+import { makeBackup, restoreBackup } from '../backup.js';
 import { siteHost, brokenSitePatch } from '../sites.js';
 import { installCertificate } from '../certsetup.js';
 import { runSelfTest } from '../selftest.js';
@@ -99,7 +100,12 @@ export class ApiServer {
       ['GET', '/api/diagnostics', () => ({
         [RAW]: true, type: 'application/zip', body: collectDiagnostics(app),
         filename: `AdHush-logs-${new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-')}.zip`,
-      })],      ['POST', '/api/protection', (b) => {
+      })],      ['GET', '/api/backup', () => ({
+        [RAW]: true, type: 'application/json', body: Buffer.from(JSON.stringify(makeBackup(app), null, 2)),
+        filename: `AdHush-backup-${new Date().toISOString().slice(0, 10)}.json`,
+      })],
+      ['POST', '/api/backup/restore', (b) => restoreBackup(app, b)],
+      ['POST', '/api/protection', (b) => {
         app.settings.update({ protection: { enabled: !!b.enabled, pausedUntil: 0 } });
         return app.status().protection;
       }],
@@ -115,20 +121,9 @@ export class ApiServer {
         app.settings.update(b);
         return S();
       }],
-      ['GET', '/api/settings/export', () => ({
-        app: 'adhush', exportedAt: new Date().toISOString(), settings: S(),
-        filters: app.filters.filters.map(({ id, enabled, custom, name, url }) => ({ id, enabled, custom, name, url })),
-      })],
-      ['POST', '/api/settings/import', async (b) => {
-        if (b.app !== 'adhush' || !b.settings) throw httpError(400, 'not a AdHush settings export');
-        const { api, ...rest } = b.settings; // never import the API binding
-        app.settings.replace({ ...rest, api: S().api });
-        for (const f of b.filters || []) {
-          if (f.custom && !app.filters.filters.some((x) => x.url === f.url)) await app.filters.add({ url: f.url, name: f.name }).catch(() => {});
-          else if (app.filters.get(f.id) && !f.custom) await app.filters.setEnabled(f.id, f.enabled);
-        }
-        return { ok: true };
-      }],
+      // Older names for the backup routes (0.3 and earlier); files exported then still restore.
+      ['GET', '/api/settings/export', () => makeBackup(app)],
+      ['POST', '/api/settings/import', (b) => restoreBackup(app, b)],
       ['POST', '/api/settings/reset', () => {
         const { api } = S();
         app.settings.replace({ api });

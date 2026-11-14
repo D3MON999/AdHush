@@ -7,6 +7,7 @@ import { FilterManager } from './filters/manager.js';
 import { RuleEngine } from './rules/engine.js';
 import { safeSearchRules } from './rules/safesearch.js';
 import { Resolver } from './dns/upstream.js';
+import { NetworkDns } from './network.js';
 import { DnsCache } from './dns/cache.js';
 import { DnsServer } from './dns/server.js';
 import { QueryLog } from './querylog.js';
@@ -19,6 +20,7 @@ import { AppCatalog } from './apps.js';
 import { UserscriptManager } from './userscripts.js';
 import { Notifications } from './notifications.js';
 import { secureDnsRules, SELFTEST_RULE } from './browserguard.js';
+import { runSelfTest } from './selftest.js';
 import { logger } from './log.js';
 
 const log = logger('app');
@@ -47,6 +49,9 @@ export function normalizeDomain(input) {
     .replace(/[/^$].*$/, '').replace(/\.$/, '');
 }
 
+const CHECK_FIRST_MS = 3 * 60 * 1000;
+const CHECK_EVERY_MS = 3 * 60 * 60 * 1000;
+
 export class App {
   constructor({ dataDir, version, overrides = {} }) {
     this.dataDir = dataDir;
@@ -60,7 +65,8 @@ export class App {
     this.cache = new DnsCache(this.settings.get().dns.cache);
     this.engine = new RuleEngine();
     this.engineInfo = { builtAt: 0, ms: 0 };
-    this.resolver = new Resolver(this.settings.get().dns);
+    this.network = new NetworkDns(dataDir);
+    this.resolver = this.makeResolver();
     this.dns = new DnsServer({
       settings: this.settings,
       getEngine: () => this.engine,
@@ -76,6 +82,20 @@ export class App {
     this.apps = new AppCatalog();
     this.userscripts = new UserscriptManager(dataDir).load();
     this.rebuildTimer = null;
+  }
+
+  makeResolver() {
+    return new Resolver(this.settings.get().dns, {
+      networkDns: () => this.network.servers(),
+      onNetworkMode: (on) => {
+        log.info(on ? 'secure DNS unreachable: using the network\'s own DNS' : 'secure DNS reachable again');
+        // A flaky network can switch back and forth: tell the user at most once every 10 minutes.
+        if (on && Date.now() - (this.networkNoticeAt || 0) > 10 * 60 * 1000) {
+          this.networkNoticeAt = Date.now();
+          this.notifications.push('info', 'Using this network\'s DNS', 'This Wi-Fi may need you to sign in, or it blocks secure DNS. AdHush is using the network\'s own DNS for now, and ads are still blocked.');
+        }
+      },
+    });
   }
 
   filterName(id) {
@@ -118,7 +138,7 @@ export class App {
     const s = this.settings.get();
     if (sections.includes('dns')) {
       this.resolver.close();
-      this.resolver = new Resolver(s.dns);
+      this.resolver = this.makeResolver();
       Object.assign(this.cache, { size: s.dns.cache.size, minTtl: s.dns.cache.minTtl, maxTtl: s.dns.cache.maxTtl });
       this.cache.clear();
     }
@@ -190,10 +210,36 @@ export class App {
     this.windowsPrivacy.sync(this.windowsWanted());
     this.statsTimer = setInterval(() => this.stats.save(), 60000);
     this.statsTimer.unref();
+    this.checkTimer = setTimeout(() => this.backgroundCheck(), CHECK_FIRST_MS);
+    this.checkTimer.unref();
+  }
+
+  // "Check my protection", run quietly every few hours: a notification only when a problem appears
+  // (once per problem, again only if it comes back after being fixed). Choices the user made on
+  // purpose, like turning protection off, aren't problems.
+  async backgroundCheck() {
+    this.checkTimer = setTimeout(() => this.backgroundCheck(), CHECK_EVERY_MS);
+    this.checkTimer.unref();
+    if (!this.settings.get().system.backgroundCheck || !this.settings.isProtectionActive()) return;
+    let report;
+    try {
+      report = await (this.selfTest || runSelfTest)(this); // selfTest: replaced in tests
+    } catch (e) {
+      log.warn(`background check failed: ${e.message}`);
+      return;
+    }
+    const problems = report.checks.filter((c) => (c.status === 'fail' && c.id !== 'protection') || (c.status === 'warn' && c.id === 'wholepc'));
+    const fresh = problems.filter((c) => !this.reportedProblems?.has(c.id));
+    this.reportedProblems = new Set(problems.map((c) => c.id));
+    if (!fresh.length) return;
+    log.warn(`background check: ${fresh.map((c) => `${c.id}: ${c.detail}`).join(' | ')}`);
+    const title = fresh.length === 1 ? `${fresh[0].name} needs a look` : 'AdHush found some problems';
+    this.notifications.push('warning', title, `${fresh.map((c) => c.detail).join(' ')} Open AdHush and choose Check my protection for details.`);
   }
 
   async stop() {
     clearInterval(this.statsTimer);
+    clearTimeout(this.checkTimer);
     clearInterval(this.extensionTimer);
     clearTimeout(this.pauseTimer);
     this.core.stop();

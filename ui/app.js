@@ -861,6 +861,7 @@ views.settings = async () => {
       <div class="card"><h2>Get help</h2>
         <p class="hint" style="margin-top:0">Something not working? Save a logs file and send it to whoever helps you. It contains AdHush's logs and settings, but not your browsing statistics, the query log or any passwords or keys.</p>
         <div class="row"><a class="btn" href="#/check">Check my protection</a><button id="diag" class="primary">Save logs file</button></div>
+        <div class="toggle-row" style="margin-top:6px">${sw('bgcheck', s.system.backgroundCheck)}<div class="body"><div class="name">Check in the background</div><div class="desc">Runs the same check every few hours and only tells you if something breaks, like a VPN taking over.</div></div></div>
         <p class="hint">No internet at all? Use <strong>Restore normal internet</strong> in the Start menu (AdHush folder) or the tray icon's menu.</p>
         <p class="hint">AdHush is free software under the GNU GPL v3. Licences and third-party notices are in the <code>licenses</code> folder of the installation.</p>
       </div>
@@ -906,7 +907,8 @@ views.settings = async () => {
         <div class="toggle-row">${sw('notif', s.ui.notifications)}<div class="body"><div class="name">Tray notifications</div><div class="desc">Filter updates, pause ending, and problems that need attention.</div></div></div>
         <div class="row"><button id="save-log" class="primary">Save</button><button id="rerun">Run setup wizard again</button></div>
         <h2 style="margin-top:22px">Backup</h2>
-        <div class="row"><button id="exp">Export settings</button><label class="btn">Import…<input type="file" id="imp" accept=".json" hidden></label><button id="reset" class="danger">Reset to defaults</button></div>
+        <p class="hint" style="margin-top:0">Save your filter lists, rules, allow and block lists and settings to a file. Restore it after reinstalling, or on another PC to set it up the same way.</p>
+        <div class="row"><button id="bak-save">Save a backup</button><button id="bak-restore">Restore from a file</button><input type="file" id="bak-file" accept=".json,application/json" hidden><button id="reset" class="danger">Reset to defaults</button></div>
       </div>
     </div>`;
   api('GET', '/api/status').then((st) => renderDnsState($('#mdns-state'), st.systemDns)).catch(() => {});
@@ -934,9 +936,13 @@ views.settings = async () => {
     e.target.checked ? 'Whole-PC protection on: applying within 15 seconds' : 'Whole-PC protection off: restoring normal DNS')
     .then(() => setTimeout(() => api('GET', '/api/status').then((st) => renderDnsState($('#mdns-state'), st.systemDns)).catch(() => {}), 16000));
   $('#sdns').onchange = (e) => act(() => api('PATCH', '/api/settings', { system: { stopSecureDns: e.target.checked } }), 'Saved');
+  $('#bgcheck').onchange = (e) => act(() => api('PATCH', '/api/settings', { system: { backgroundCheck: e.target.checked } }), 'Saved');
   $('#game').onchange = (e) => act(() => api('PATCH', '/api/settings', { gaming: { enabled: e.target.checked } }), 'Saved');
   $$('[data-forget]').forEach((b) => (b.onclick = () => act(() => api('POST', '/api/gaming/forget', { exe: b.dataset.forget }), 'It will be filtered again').then(() => route())));
   $('#diag').onclick = () => saveDiagnostics($('#diag'));
+  $('#bak-save').onclick = () => saveFromApi($('#bak-save'), { cmd: 'saveBackup', endpoint: '/api/backup', fallbackName: 'AdHush-backup.json', what: 'Backup' });
+  $('#bak-restore').onclick = () => $('#bak-file').click();
+  $('#bak-file').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) restoreFromFile(f); };
   // Opening Settings checks for updates (at most every 10 minutes); the service answers within seconds.
   let checkingSince = 0;
   const showUpdates = () => api('GET', '/api/updates').then((u) => {
@@ -972,22 +978,6 @@ views.settings = async () => {
   $('#save-mod').onclick = () => patch({ security: { enabled: $('#sec').checked }, parental: { enabled: $('#pc').checked, safeSearch: parentalChoice.ss, blockAdult: parentalChoice.adult }, filtering: { updateIntervalHours: num('#ui') } }).then(refreshSidebar);
   $('#save-log').onclick = () => patch({ queryLog: { enabled: $('#ql').checked, size: num('#qls') }, stats: { enabled: $('#stt').checked, retentionDays: num('#ret') }, ui: { notifications: $('#notif').checked } });
   $('#rerun').onclick = () => { location.hash = '#/welcome'; };
-  $('#exp').onclick = async () => {
-    const data = await act(() => api('GET', '/api/settings/export'));
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
-    a.download = `adhush-settings-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
-  $('#imp').onchange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    let data;
-    try { data = JSON.parse(await file.text()); } catch { return toast('That file is not valid JSON', true); }
-    await act(() => api('POST', '/api/settings/import', data), 'Settings imported');
-    route();
-  };
   $('#reset').onclick = () => confirm('Reset all settings, rules and lists to defaults?') && act(() => api('POST', '/api/settings/reset'), 'Settings reset').then(route);
 };
 
@@ -1100,28 +1090,50 @@ function renderUpdates(u, checking = false) {
     ${u.status === 'available' && u.notes ? `<br>What's new: ${esc(u.notes)}` : ''}`;
 }
 
-// Saves the logs zip: through the tray (to the Desktop) inside the AdHush window, else as a browser download.
-async function saveDiagnostics(btn) {
+// Saves a file the service makes: through the tray (to the Desktop) inside the AdHush window, else
+// as a browser download.
+async function saveFromApi(btn, { cmd, endpoint, fallbackName, what }) {
   btn.disabled = true;
   try {
     if (window.ipc) {
-      const r = await native({ cmd: 'saveDiagnostics' });
+      const r = await native({ cmd });
       if (!r.ok) throw new Error(r.error);
       toast(`Saved to your Desktop: ${r.file.split('\\').pop()}`);
       return;
     }
-    const res = await fetch('/api/diagnostics', { headers: { 'x-adhush-token': TOKEN } });
+    const res = await fetch(endpoint, { headers: { 'x-adhush-token': TOKEN } });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const name = (res.headers.get('content-disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'AdHush-logs.zip';
+    const name = (res.headers.get('content-disposition') || '').match(/filename="([^"]+)"/)?.[1] || fallbackName;
     const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(await res.blob()), download: name });
     a.click();
     URL.revokeObjectURL(a.href);
-    toast('Logs file downloaded');
+    toast(`${what} downloaded`);
   } catch (e) {
-    toast(`Could not save logs: ${e.message}`, true);
+    toast(`Could not save the ${what.toLowerCase()}: ${e.message}`, true);
   } finally {
     btn.disabled = false;
   }
+}
+const saveDiagnostics = (btn) => saveFromApi(btn, { cmd: 'saveDiagnostics', endpoint: '/api/diagnostics', fallbackName: 'AdHush-logs.zip', what: 'Logs file' });
+
+// Restores a backup file the person picks; shows what's in it and asks before changing anything.
+async function restoreFromFile(file) {
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+  } catch {
+    return toast("That file isn't an AdHush backup.", true);
+  }
+  if (data?.app !== 'adhush') return toast("That file isn't an AdHush backup.", true);
+  const when = data.exportedAt ? new Date(data.exportedAt).toLocaleDateString() : 'an unknown date';
+  const lists = Array.isArray(data.filters) ? data.filters.filter((f) => f.enabled).length : 0;
+  if (!confirm(`Restore the backup from ${when}?\n\nIt replaces your filter lists (${lists} on), rules, allow and block lists, tracking protection, theme and other settings.\n\nWhole-PC protection and web filtering stay as they are on this PC.`)) return;
+  const r = await act(() => api('POST', '/api/backup/restore', data)).catch(() => null);
+  if (!r) return;
+  toast(r.failed.length ? `Restored, but ${r.failed.length} list${r.failed.length > 1 ? 's' : ''} couldn't be added: ${r.failed[0]}` : 'Backup restored', !!r.failed.length);
+  applyTheme((await api('GET', '/api/settings')).ui.theme);
+  refreshSidebar();
+  views.settings();
 }
 
 // ---------- first-run wizard ----------

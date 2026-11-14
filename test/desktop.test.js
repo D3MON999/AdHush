@@ -145,3 +145,16 @@ test('native host commands', async () => {
   await assert.rejects(handle({ cmd: 'eval', code: '1' }, call), /unknown command/);
   assert.equal((await handle({ cmd: 'ui' }, call)).url, 'http://127.0.0.1:8899/');
 });
+
+test('host reports which contacted sites AdHush blocks, and ignores junk names', async () => {
+  const asked = [];
+  const call = async (method, p) => {
+    asked.push(p);
+    const name = decodeURIComponent(p.split('name=')[1]);
+    return { name, action: name.includes('ads') ? 'block' : 'none', rule: `||${name}^`, filterName: 'Test list' };
+  };
+  const r = await handle({ cmd: 'blocked', hosts: ['ads.example.com', 'cdn.example.com', 'ADS.example.com', 'not a host', 'x'.repeat(300) + '.com', 42] }, call);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.blocked, [{ host: 'ads.example.com', filter: 'Test list', rule: '||ads.example.com^' }]);
+  assert.equal(asked.length, 2, 'duplicates and invalid names are not looked up');
+});
