@@ -43,16 +43,18 @@ function timeoutError(what, ms) {
   return e;
 }
 
-export function udpExchange(ip, port, query, timeoutMs) {
+// resendMs: send the question again at this interval until answered (UDP packets can be lost).
+export function udpExchange(ip, port, query, timeoutMs, resendMs = 0) {
   return new Promise((resolve, reject) => {
     const sock = dgram.createSocket(net.isIPv6(ip) ? 'udp6' : 'udp4');
     const id = query.readUInt16BE(0);
-    const timer = setTimeout(() => { sock.close(); reject(timeoutError(`udp ${ip}`, timeoutMs)); }, timeoutMs);
-    sock.on('error', (e) => { clearTimeout(timer); sock.close(); reject(e); });
+    const resend = resendMs ? setInterval(() => sock.send(query, port, ip), resendMs) : null;
+    const done = () => { clearTimeout(timer); clearInterval(resend); sock.close(); };
+    const timer = setTimeout(() => { done(); reject(timeoutError(`udp ${ip}`, timeoutMs)); }, timeoutMs);
+    sock.on('error', (e) => { done(); reject(e); });
     sock.on('message', (msg) => {
       if (msg.length < 12 || msg.readUInt16BE(0) !== id) return; // ignore stray packets
-      clearTimeout(timer);
-      sock.close();
+      done();
       resolve(msg);
     });
     sock.send(query, port, ip);
@@ -345,7 +347,7 @@ export class Resolver {
   async viaNetwork(query) {
     const servers = this.networkDns ? await this.networkDns() : [];
     if (!servers.length) throw new Error('no network DNS servers');
-    return Promise.any(servers.map((ip) => udpExchange(ip, 53, query, NETWORK_TIMEOUT_MS).then((response) => ({ response, upstream: `network ${ip}` }))));
+    return Promise.any(servers.map((ip) => udpExchange(ip, 53, query, NETWORK_TIMEOUT_MS, 800).then((response) => ({ response, upstream: `network ${ip}` }))));
   }
 
   setNetworkMode(on) {

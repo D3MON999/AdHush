@@ -897,6 +897,7 @@ views.settings = async () => {
         <div class="toggle-row sub" data-needs="pc">${sw('adult', s.parental.blockAdult)}<div class="body"><div class="name">Block adult websites</div></div></div>
         <label class="field" style="margin-top:12px"><span>Filter update interval</span><select id="ui">
           ${[[0, 'Never (manual only)'], [1, 'Every hour'], [6, 'Every 6 hours'], [12, 'Every 12 hours'], [24, 'Every day'], [48, 'Every 2 days'], [168, 'Every week']].map(([v, l]) => `<option value="${v}" ${v === s.filtering.updateIntervalHours ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <p class="hint" style="margin-top:-4px">Malware and phishing lists are checked every hour unless updates are set to never.</p>
         <button id="save-mod" class="primary">Save</button>
       </div>
       <div class="card"><h2>Logs &amp; statistics</h2>

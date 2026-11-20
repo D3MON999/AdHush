@@ -12,6 +12,7 @@ import { httpGet } from '../httpget.js';
 
 const log = logger('filters');
 const MAX_BYTES = 64 * 1024 * 1024;
+const THREAT_LIST_HOURS = 1;
 const STATE_FIELDS = ['enabled', 'lastUpdate', 'lastCheck', 'version', 'title', 'rulesCount', 'error', 'etag', 'lastModified', 'expiresHours'];
 
 function parseExpiresHours(v) {
@@ -222,8 +223,11 @@ export class FilterManager extends EventEmitter {
 
   isDue(f, now = Date.now()) {
     if (!fs.existsSync(this.file(f.id))) return true;
-    const hours = this.settings.get().filtering.updateIntervalHours;
+    let hours = this.settings.get().filtering.updateIntervalHours;
     if (!hours) return false; // automatic updates disabled
+    // Scam and malware sites appear and disappear within hours, so threat lists are checked hourly.
+    // Unchanged lists answer "not modified", so this costs almost nothing.
+    if (f.group === 'security') hours = Math.min(hours, THREAT_LIST_HOURS);
     const interval = (f.expiresHours ? Math.min(f.expiresHours, hours) : hours) * 3600 * 1000;
     return now - (f.lastCheck || 0) >= interval;
   }

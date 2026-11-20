@@ -158,3 +158,25 @@ test('host reports which contacted sites AdHush blocks, and ignores junk names',
   assert.deepEqual(r.blocked, [{ host: 'ads.example.com', filter: 'Test list', rule: '||ads.example.com^' }]);
   assert.equal(asked.length, 2, 'duplicates and invalid names are not looked up');
 });
+
+test('threat lists are due every hour, other lists on the normal schedule', async () => {
+  const { FilterManager } = await import('../src/filters/manager.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adhush-due-'));
+  const settings = new Settings(dir).load();
+  const filters = new FilterManager(dir, settings).load();
+  fs.mkdirSync(path.join(dir, 'filters'), { recursive: true });
+  for (const id of [1, 30]) fs.writeFileSync(path.join(dir, 'filters', `${id}.txt`), '||x.example^\n');
+  const ads = filters.get(1);
+  const threats = filters.get(30);
+  const now = Date.now();
+  ads.lastCheck = threats.lastCheck = now - 2 * 3600 * 1000;
+  settings.update({ filtering: { updateIntervalHours: 24 } });
+  assert.equal(filters.isDue(threats, now), true);
+  assert.equal(filters.isDue(ads, now), false);
+  threats.lastCheck = now - 30 * 60 * 1000;
+  assert.equal(filters.isDue(threats, now), false);
+  settings.update({ filtering: { updateIntervalHours: 0 } });
+  threats.lastCheck = 0;
+  assert.equal(filters.isDue(threats, now), false, 'never means never');
+  fs.rmSync(dir, { recursive: true, force: true });
+});

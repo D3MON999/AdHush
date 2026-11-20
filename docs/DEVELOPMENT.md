@@ -231,6 +231,9 @@ Settings → Logs & statistics → Backup saves `AdHush-backup-<date>.json` to t
 ### Downloads
 Filter lists, the tracker database and userscripts are downloaded with Node's plain http/https modules (`src/httpget.js`: redirects, gzip/deflate/brotli, size limit, timeout) instead of the built-in fetch, which sometimes threw an internal assertion when a server closed the connection. A failed list download is retried once after 3 seconds, and each address gets 2.5 seconds to connect (`net.setDefaultAutoSelectFamilyAttemptTimeout` in `src/index.js`; Node's default of 250 ms made some list servers fail at random).
 
+### Threat lists
+Lists in the security group (malware, phishing, scams) are due every hour instead of on the normal schedule (`THREAT_LIST_HOURS` in `src/filters/manager.js`), unless updates are set to never. The 30-minute update timer picks them up; unchanged lists answer 304 Not Modified.
+
 ### Memory
 Plain block rules (`||ads.com^`, `ads.com`, `0.0.0.0 ads.com`, `|ads.com^`) are stored in the rule engine as one number each (list and spelling) and rebuilt into the same rule object only when a lookup touches them; anything else stays a full object. Lists are added one at a time after collecting `$badfilter` rules first. With the default lists this took the engine from about 255 MB to 64 MB and the service from about 555 MB to 165 MB, with identical answers (`test/rules.test.js` compares both ways).
 

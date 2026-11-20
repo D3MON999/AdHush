@@ -19,8 +19,9 @@ test('reads the network DNS servers from the registry and the DNS backup', () =>
 });
 
 // A tiny DNS server standing in for the hotel router: answers every A query with 10.9.9.9.
-async function router() {
+async function router(t) {
   const sock = dgram.createSocket('udp4');
+  t.after(() => { try { sock.close(); } catch {} });
   let served = 0;
   sock.on('message', (msg, rinfo) => {
     served++;
@@ -40,8 +41,10 @@ function resolverWith(r, { secureUp }) {
   res.viaNetwork = async function viaNetwork(query) {
     return new Promise((resolve, reject) => {
       const s = dgram.createSocket('udp4');
-      const t = setTimeout(() => { s.close(); reject(new Error('timeout')); }, 1000);
-      s.on('message', (m) => { clearTimeout(t); s.close(); resolve({ response: m, upstream: 'network 127.0.0.1' }); });
+      // Resend like a real DNS client: other network software on a PC can drop a first UDP packet.
+      const resend = setInterval(() => s.send(query, r.port, '127.0.0.1'), 150);
+      const t = setTimeout(() => { clearInterval(resend); s.close(); reject(new Error('timeout')); }, 2000);
+      s.on('message', (m) => { clearTimeout(t); clearInterval(resend); s.close(); resolve({ response: m, upstream: 'network 127.0.0.1' }); });
       s.send(query, r.port, '127.0.0.1');
     });
   };
@@ -49,8 +52,8 @@ function resolverWith(r, { secureUp }) {
   return { res, modes };
 }
 
-test('falls back to the network DNS when secure DNS is blocked, and returns when it works again', async () => {
-  const r = await router();
+test('falls back to the network DNS when secure DNS is blocked, and returns when it works again', async (t) => {
+  const r = await router(t);
   const secureUp = { value: false };
   const { res, modes } = resolverWith(r, { secureUp });
   const answer = await res.resolve(buildQuery('captive.example', 1));
@@ -65,14 +68,28 @@ test('falls back to the network DNS when secure DNS is blocked, and returns when
   assert.equal(res.usingNetwork, false);
   assert.deepEqual(modes, [true, false]);
   assert.equal((await res.resolve(buildQuery('example.org', 1))).upstream, 'secure');
-  r.sock.close();
 });
 
-test('nothing changes while secure DNS works', async () => {
-  const r = await router();
+test('nothing changes while secure DNS works', async (t) => {
+  const r = await router(t);
   const { res, modes } = resolverWith(r, { secureUp: { value: true } });
   assert.equal((await res.resolve(buildQuery('example.org', 1))).upstream, 'secure');
   assert.equal(r.served, 0);
   assert.deepEqual(modes, []);
-  r.sock.close();
+});
+
+test('a lost UDP packet is resent instead of waiting out the timeout', async (t) => {
+  const { udpExchange } = await import('../src/dns/upstream.js');
+  const sock = dgram.createSocket('udp4');
+  t.after(() => sock.close());
+  let seen = 0;
+  sock.on('message', (msg, rinfo) => {
+    if (++seen === 1) return; // drop the first question
+    sock.send(buildResponse(msg, parse(msg), { records: [{ type: 'A', value: '10.9.9.9' }], ttl: 5 }), rinfo.port, rinfo.address);
+  });
+  await new Promise((r) => sock.bind(0, '127.0.0.1', r));
+  const started = Date.now();
+  const res = parse(await udpExchange('127.0.0.1', sock.address().port, buildQuery('lost.example', 1), 3000, 200));
+  assert.equal(res.answers[0].data, '10.9.9.9');
+  assert.ok(Date.now() - started < 1500);
 });
