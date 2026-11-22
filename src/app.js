@@ -7,7 +7,7 @@ import { FilterManager } from './filters/manager.js';
 import { RuleEngine } from './rules/engine.js';
 import { safeSearchRules } from './rules/safesearch.js';
 import { Resolver } from './dns/upstream.js';
-import { NetworkDns } from './network.js';
+import { ConnectedNetworks, NetworkDns } from './network.js';
 import { DnsCache } from './dns/cache.js';
 import { DnsServer } from './dns/server.js';
 import { QueryLog } from './querylog.js';
@@ -66,11 +66,14 @@ export class App {
     this.engine = new RuleEngine();
     this.engineInfo = { builtAt: 0, ms: 0 };
     this.network = new NetworkDns(dataDir);
+    this.networks = new ConnectedNetworks();
+    this.onExcludedNetwork = false;
     this.resolver = this.makeResolver();
     this.dns = new DnsServer({
       settings: this.settings,
       getEngine: () => this.engine,
       getResolver: () => this.resolver,
+      bypass: () => this.onExcludedNetwork,
       cache: this.cache,
       queryLog: this.queryLog,
       stats: this.stats,
@@ -152,6 +155,7 @@ export class App {
     if (sections.includes('https')) this.core.sync();
     if (sections.some((k) => ['filtering', 'parental', 'security', 'protection', 'https', 'privacy', 'apps', 'extensions'].includes(k))) this.core.scheduleReload();
     if (sections.includes('privacy') || sections.includes('system')) this.windowsPrivacy.sync(this.windowsWanted());
+    if (sections.includes('system')) this.checkNetworks();
   }
 
   // Registry changes to keep in place: the user's privacy switches, plus the browser guard while
@@ -212,6 +216,27 @@ export class App {
     this.statsTimer.unref();
     this.checkTimer = setTimeout(() => this.backgroundCheck(), CHECK_FIRST_MS);
     this.checkTimer.unref();
+    this.checkNetworks();
+    this.networkTimer = setInterval(() => this.checkNetworks(), 60000);
+    this.networkTimer.unref();
+  }
+
+  // Is this PC on a network the person chose not to filter (Settings → Whole-PC protection)? Checked
+  // every minute, and only when there are such networks.
+  async checkNetworks() {
+    const excluded = this.settings.get().system.excludedNetworks.map((n) => n.toLowerCase());
+    let now = false;
+    let name = '';
+    if (excluded.length) {
+      const names = await this.networks.names().catch(() => []);
+      name = names.find((n) => excluded.includes(n.toLowerCase())) || '';
+      now = !!name;
+    }
+    if (now === this.onExcludedNetwork) return;
+    this.onExcludedNetwork = now;
+    this.cache.clear();
+    log.info(now ? `on "${name}": not filtering, as set in Settings` : 'left the excluded network: filtering again');
+    if (now) this.notifications.push('info', `Not filtering on ${name}`, 'You chose not to filter on this network. Change it in Settings → Whole-PC protection.');
   }
 
   // "Check my protection", run quietly every few hours: a notification only when a problem appears
@@ -240,6 +265,7 @@ export class App {
   async stop() {
     clearInterval(this.statsTimer);
     clearTimeout(this.checkTimer);
+    clearInterval(this.networkTimer);
     clearInterval(this.extensionTimer);
     clearTimeout(this.pauseTimer);
     this.core.stop();
@@ -364,6 +390,7 @@ export class App {
       filters: { enabled: this.filters.activeFilters().length, total: this.filters.filters.length },
       onboarded: s.ui.onboarded,
       gaming: this.gamingState(),
+      network: { excluded: this.onExcludedNetwork },
       // Written by setup after it trusts this PC's root certificate; web filtering is unsafe without it.
       caInstalled: fs.existsSync(path.join(this.dataDir, 'ca', 'installed-thumbprint')),
       extensionDir: EXTENSION_DIR,

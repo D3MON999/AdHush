@@ -38,6 +38,9 @@ export const DEFAULTS = {
     cosmetic: true,
     skipEv: true,
     autoExclude: true,
+    // While web filtering is on, answer HTTPS-record lookups with no data, so browsers don't use
+    // Encrypted Client Hello: it hides the real site from the filter and can make pages fail to load.
+    blockEch: true,
     exclusions: [],
     corePath: '',
     // Driver mode: WinDivert redirects selected apps' traffic (needs administrator rights).
@@ -88,7 +91,8 @@ export const DEFAULTS = {
   // manageDns: the AdHush service points Windows DNS at AdHush (and restores it if AdHush stops answering).
   // stopSecureDns: keep browsers' Secure DNS from skipping AdHush (browserguard.js).
   // backgroundCheck: run the self-test every few hours and warn only when something breaks.
-  system: { manageDns: false, stopSecureDns: true, backgroundCheck: true },
+  // excludedNetworks: network names (as Windows shows them) where DNS filtering is off, e.g. work Wi-Fi.
+  system: { manageDns: false, stopSecureDns: true, backgroundCheck: true, excludedNetworks: [] },
   // Gaming mode: while a full-screen game runs, hold notifications and updates (reported by the tray).
   // games: programs the mode left out of all-apps filtering, so they can be listed and put back.
   gaming: { enabled: true, games: [] },
@@ -97,7 +101,8 @@ export const DEFAULTS = {
   // notifications: tray toasts; onboarded: the first-run wizard has been completed or skipped.
   // theme: obsidian | midnight | sand | ember | raspberry | auto (sand or obsidian, following Windows)
   // defaultsVersion: which release's recommended filter set this install has received (see App.upgradeDefaults).
-  ui: { theme: 'obsidian', notifications: true, onboarded: false, defaultsVersion: 4 },
+  // regionalDismissed: the person said no to the regional-list suggestion on the Filters page.
+  ui: { theme: 'obsidian', notifications: true, onboarded: false, defaultsVersion: 4, regionalDismissed: false },
 };
 
 function isPlainObject(v) {

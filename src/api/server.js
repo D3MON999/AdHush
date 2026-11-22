@@ -100,7 +100,8 @@ export class ApiServer {
       ['GET', '/api/diagnostics', () => ({
         [RAW]: true, type: 'application/zip', body: collectDiagnostics(app),
         filename: `AdHush-logs-${new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-')}.zip`,
-      })],      ['GET', '/api/backup', () => ({
+      })],      ['GET', '/api/networks', async () => ({ current: await app.networks.names({ fresh: true }), excluded: app.settings.get().system.excludedNetworks, active: app.onExcludedNetwork })],
+      ['GET', '/api/backup', () => ({
         [RAW]: true, type: 'application/json', body: Buffer.from(JSON.stringify(makeBackup(app), null, 2)),
         filename: `AdHush-backup-${new Date().toISOString().slice(0, 10)}.json`,
       })],

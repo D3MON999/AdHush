@@ -51,3 +51,32 @@ export class NetworkDns {
     return this.cache.servers;
   }
 }
+
+// The names Windows gives the networks this PC is connected to: the Wi-Fi name, or "Network" (or
+// "Network 2") for most cables. Read with Get-NetConnectionProfile, which works for the SYSTEM service
+// and, unlike `netsh wlan`, doesn't need location permission.
+export function parseProfiles(json) {
+  try {
+    const list = JSON.parse(String(json || '').replace(/^\uFEFF/, '') || '[]');
+    return [...new Set((Array.isArray(list) ? list : [list]).map((p) => String(p?.Name || '').trim()).filter(Boolean))];
+  } catch {
+    return [];
+  }
+}
+
+export class ConnectedNetworks {
+  constructor() {
+    this.cache = { at: 0, names: [] };
+  }
+
+  async names({ fresh = false } = {}) {
+    if (!fresh && Date.now() - this.cache.at < 20000) return this.cache.names;
+    if (process.platform !== 'win32') return [];
+    const names = await new Promise((resolve) => {
+      execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-NetConnectionProfile | Select-Object Name | ConvertTo-Json -Compress'],
+        { windowsHide: true, timeout: 15000 }, (err, stdout) => resolve(err ? null : parseProfiles(stdout)));
+    });
+    if (names) this.cache = { at: Date.now(), names };
+    return this.cache.names;
+  }
+}

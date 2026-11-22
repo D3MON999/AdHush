@@ -231,6 +231,15 @@ Settings → Logs & statistics → Backup saves `AdHush-backup-<date>.json` to t
 ### Downloads
 Filter lists, the tracker database and userscripts are downloaded with Node's plain http/https modules (`src/httpget.js`: redirects, gzip/deflate/brotli, size limit, timeout) instead of the built-in fetch, which sometimes threw an internal assertion when a server closed the connection. A failed list download is retried once after 3 seconds, and each address gets 2.5 seconds to connect (`net.setDefaultAutoSelectFamilyAttemptTimeout` in `src/index.js`; Node's default of 250 ms made some list servers fail at random).
 
+### Encrypted Client Hello
+While web filtering is on, HTTPS-record lookups (type 65) are answered with no data (`https.blockEch`, on by default; Web filtering → Options). Browsers learn ECH keys from those records; with ECH the real site name is hidden from the web filter, which then can't filter the page and can make it fail to load. Browsers still connect normally and still learn HTTP/3 support from the site itself.
+
+### Regional lists
+Fifteen web-filtering lists for sites in other languages (group `webregional`, `src/filters/catalog.js`), each tagged with languages and countries. The Filters page suggests the ones matching the browser window's languages (`navigator.languages`, which follows Windows), e.g. `en-IN` or `hi` → IndianList, with *Turn on* and *No thanks* (`ui.regionalDismissed`). The setup wizard turns them on when ad blocking and web filtering are chosen.
+
+### Networks without filtering
+Settings → Whole-PC protection lists the networks this PC is connected to (names from `Get-NetConnectionProfile`, which works for the SYSTEM service without location permission) with *Don't filter here*. On those networks (`system.excludedNetworks`, case-insensitive) DNS filtering is off: lookups are answered by the upstreams without rules. Checked every minute while the list isn't empty; a notification says so once per change, the Overview shows it and the self-test reports it as a warning. Web filtering in browsers is unaffected.
+
 ### Threat lists
 Lists in the security group (malware, phishing, scams) are due every hour instead of on the normal schedule (`THREAT_LIST_HOURS` in `src/filters/manager.js`), unless updates are set to never. The 30-minute update timer picks them up; unchanged lists answer 304 Not Modified.
 

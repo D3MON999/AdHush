@@ -60,6 +60,8 @@
 
 The browser extension shows what was blocked on the page you're on, and lets you allow any of it in one click. AdHush also checks itself every few hours and only speaks up if something breaks, like a VPN taking over.
 
+Ad lists for sites in your language are suggested from your Windows languages, for example IndianList for India. You can also turn filtering off on chosen networks, like work Wi-Fi that needs its own DNS.
+
 There's more in the app: settings backup, custom filter lists, your own rules, allow and block lists, encrypted DNS, userscripts and a browser extension for Chromium browsers. Safe search and adult-site blocking are there too, off until you want them.
 
 ## Safe by design

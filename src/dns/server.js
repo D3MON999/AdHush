@@ -163,7 +163,8 @@ export class DnsServer {
     const q = msg.questions[0];
     const started = Date.now();
     const settings = this.settings.get();
-    const active = this.settings.isProtectionActive(started);
+    // bypass(): true on a network the person chose not to filter (Settings → Whole-PC protection).
+    const active = this.settings.isProtectionActive(started) && !this.bypass?.();
     const engine = this.getEngine();
     const entry = {
       time: started, client, proto, name: q.name, type: RR_NAMES[q.type] || String(q.type),
@@ -176,6 +177,10 @@ export class DnsServer {
       if (result.action === 'block') {
         response = this.blockedResponse(buf, msg, q, result.rule);
         entry.status = 'blocked';
+      } else if (active && q.type === TYPE.HTTPS && settings.https.enabled && settings.https.blockEch) {
+        response = buildResponse(buf, msg, { records: [], ttl: settings.dns.blockedTtl });
+        entry.status = 'rewritten';
+        result = { action: 'rewrite', rule: { text: 'Encrypted Client Hello off (web filtering)', filterId: null } };
       } else if (result.action === 'rewrite') {
         response = await this.rewriteResponse(buf, msg, q, result.rewrite, client);
         entry.status = 'rewritten';

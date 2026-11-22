@@ -11,10 +11,11 @@ export const GROUPS = {
   webads: 'Web filtering: Ads',
   webprivacy: 'Web filtering: Privacy & tracking',
   webannoyances: 'Web filtering: Annoyances',
+  webregional: 'Web filtering: Regional',
   custom: 'Custom',
 };
 
-export const CONTENT_GROUPS = new Set(['webads', 'webprivacy', 'webannoyances']);
+export const CONTENT_GROUPS = new Set(['webads', 'webprivacy', 'webannoyances', 'webregional']);
 
 export const CATALOG = [
   { id: 1, group: 'ads', enabled: true, name: 'AdGuard DNS filter', homepage: 'https://github.com/AdguardTeam/AdGuardSDNSFilter',
@@ -83,6 +84,31 @@ export const CATALOG = [
     url: 'https://secure.fanboy.co.nz/fanboy-annoyance.txt', description: 'Social widgets, pop-ups, newsletter prompts.' },
   { id: 122, group: 'webannoyances', scope: 'content', enabled: true, name: 'uBlock filters – Annoyances', homepage: 'https://github.com/uBlockOrigin/uAssets',
     url: 'https://ublockorigin.github.io/uAssets/filters/annoyances.txt', description: 'Overlays, chat widgets and other annoyances.' },
+  // Regional lists for sites in other languages. langs/regions: suggested to people whose browser or
+  // Windows uses one of these languages (or this country), see ui/app.js regionalSuggestions().
+  ...[
+    [130, 'IndianList', 'https://easylist-downloads.adblockplus.org/indianlist.txt', 'Sites in Hindi and other Indian languages.', ['hi', 'bn', 'gu', 'kn', 'ml', 'mr', 'ne', 'or', 'pa', 'ta', 'te'], ['IN']],
+    [131, 'EasyList Germany', 'https://easylist.to/easylistgermany/easylistgermany.txt', 'German-language sites.', ['de'], ['DE', 'AT', 'CH']],
+    [132, 'Liste FR', 'https://easylist-downloads.adblockplus.org/liste_fr.txt', 'French-language sites.', ['fr'], ['FR']],
+    [133, 'EasyList Spanish', 'https://easylist-downloads.adblockplus.org/easylistspanish.txt', 'Spanish-language sites.', ['es'], ['ES', 'MX', 'AR']],
+    [134, 'EasyList Italy', 'https://easylist-downloads.adblockplus.org/easylistitaly.txt', 'Italian-language sites.', ['it'], ['IT']],
+    [135, 'EasyList Dutch', 'https://easylist-downloads.adblockplus.org/easylistdutch.txt', 'Dutch-language sites.', ['nl'], ['NL', 'BE']],
+    [136, 'EasyList Portuguese', 'https://easylist-downloads.adblockplus.org/easylistportuguese.txt', 'Portuguese-language sites.', ['pt'], ['PT', 'BR']],
+    [137, 'EasyList Polish', 'https://easylist-downloads.adblockplus.org/easylistpolish.txt', 'Polish-language sites.', ['pl'], ['PL']],
+    [138, 'RU AdList', 'https://easylist-downloads.adblockplus.org/advblock.txt', 'Russian, Ukrainian, Uzbek and Kazakh sites.', ['ru', 'uk', 'be', 'kk', 'uz'], ['RU', 'UA', 'BY', 'KZ', 'UZ']],
+    [139, 'EasyList China', 'https://easylist-downloads.adblockplus.org/easylistchina.txt', 'Chinese-language sites.', ['zh'], ['CN', 'TW', 'HK']],
+    [140, 'AdGuard Japanese filter', 'https://filters.adtidy.org/extension/ublock/filters/7.txt', 'Japanese-language sites.', ['ja'], ['JP']],
+    [141, 'AdGuard Turkish filter', 'https://filters.adtidy.org/extension/ublock/filters/13.txt', 'Turkish-language sites.', ['tr'], ['TR']],
+    [142, 'KoreanList', 'https://easylist-downloads.adblockplus.org/koreanlist.txt', 'Korean-language sites.', ['ko'], ['KR']],
+    [143, 'ABPVN', 'https://abpvn.com/android/abpvn.txt', 'Vietnamese-language sites.', ['vi'], ['VN']],
+    [144, 'Bulgarian adblock list', 'https://stanev.org/abp/adblock_bg.txt', 'Bulgarian-language sites.', ['bg'], ['BG']],
+  ].map(([id, name, url, description, langs, regions]) => ({ id, group: 'webregional', scope: 'content', enabled: false, name, homepage: null, url, description, langs, regions })),
 ];
+
+// Regional lists that suit these languages, e.g. ['en-IN', 'hi'] -> IndianList.
+export function regionalFor(languages) {
+  const codes = (languages || []).map((l) => String(l).toLowerCase().split(/[-_]/));
+  return CATALOG.filter((f) => f.langs && codes.some(([lang, region]) => f.langs.includes(lang) || (region && f.regions.includes(region.toUpperCase()))));
+}
 
 export const CUSTOM_ID_START = 1000;

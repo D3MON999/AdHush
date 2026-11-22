@@ -176,3 +176,64 @@ test('background check ignores choices the user made and can be switched off', a
   assert.equal(app.notifications.since(0).items.length, 0);
   clearTimeout(app.checkTimer);
 });
+
+test('while web filtering is on, HTTPS-record lookups get no data (no Encrypted Client Hello)', async (t) => {
+  const { buildQuery, parse, TYPE } = await import('../src/dns/packet.js');
+  const app = makeApp(t);
+  app.rebuildEngine();
+  app.settings.update({ https: { enabled: true } });
+  app.dns.forward = async () => { throw new Error('should not be forwarded'); };
+  const res = parse(await app.dns.handle(buildQuery('cloudflare.example', TYPE.HTTPS), '127.0.0.1', 'udp'));
+  assert.equal(res.rcode, 0);
+  assert.equal(res.answers.length, 0);
+  assert.equal(app.queryLog.query({ limit: 1 })[0].rule, 'Encrypted Client Hello off (web filtering)');
+
+  app.settings.update({ https: { blockEch: false } });
+  let forwarded = false;
+  app.dns.forward = async (buf) => { forwarded = true; return { response: buf, upstream: 'test', cached: false }; };
+  await app.dns.handle(buildQuery('cloudflare.example', TYPE.HTTPS), '127.0.0.1', 'udp');
+  assert.equal(forwarded, true, 'switch off: answered normally');
+});
+
+test('network names come from Windows network profiles', async () => {
+  const { parseProfiles } = await import('../src/network.js');
+  assert.deepEqual(parseProfiles('[{"Name":"Office WiFi"},{"Name":"Network"},{"Name":"Office WiFi"}]'), ['Office WiFi', 'Network']);
+  assert.deepEqual(parseProfiles('{"Name":"Home"}'), ['Home']);
+  assert.deepEqual(parseProfiles(''), []);
+  assert.deepEqual(parseProfiles('garbage'), []);
+});
+
+test('on a network the person excluded, DNS isn\'t filtered; elsewhere it is', async (t) => {
+  const { buildQuery, parse } = await import('../src/dns/packet.js');
+  const app = makeApp(t);
+  app.settings.update({ filtering: { userRules: '||ads.example^', userRulesEnabled: true } });
+  app.rebuildEngine();
+  app.dns.forward = async (buf) => ({ response: buf, upstream: 'test', cached: false });
+  let connected = ['Office WiFi'];
+  app.networks.names = async () => connected;
+  const ask = async () => app.dns.handle(buildQuery('ads.example', 1), '127.0.0.1', 'udp').then(() => app.queryLog.query({ limit: 1 })[0].status);
+
+  await app.checkNetworks();
+  assert.equal(app.onExcludedNetwork, false, 'nothing excluded yet');
+  assert.equal(await ask(), 'blocked');
+
+  app.settings.update({ system: { excludedNetworks: ['office wifi'] } });
+  await app.checkNetworks();
+  assert.equal(app.onExcludedNetwork, true, 'names match without caring about case');
+  assert.notEqual(await ask(), 'blocked');
+  assert.equal(app.notifications.since(0).items.at(-1).title, 'Not filtering on Office WiFi');
+
+  connected = ['Home'];
+  await app.checkNetworks();
+  assert.equal(app.onExcludedNetwork, false);
+  assert.equal(await ask(), 'blocked');
+});
+
+test('regional lists match languages and countries', async () => {
+  const { regionalFor, CONTENT_GROUPS } = await import('../src/filters/catalog.js');
+  assert.deepEqual(regionalFor(['en-IN', 'en']).map((f) => f.name), ['IndianList']);
+  assert.deepEqual(regionalFor(['hi']).map((f) => f.name), ['IndianList']);
+  assert.deepEqual(regionalFor(['pt-BR']).map((f) => f.name), ['EasyList Portuguese']);
+  assert.deepEqual(regionalFor(['en-US', 'en']), []);
+  assert.ok(regionalFor(['de']).every((f) => f.scope === 'content' && CONTENT_GROUPS.has(f.group) && !f.enabled));
+});

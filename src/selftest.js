@@ -63,12 +63,13 @@ export async function runSelfTest(app) {
   const s = app.settings.get();
   const checks = [];
   const add = (id, name, result) => checks.push({ id, name, ...result });
-  const active = app.settings.isProtectionActive();
+  const active = app.settings.isProtectionActive() && !app.onExcludedNetwork;
   const dnsState = app.systemDnsState();
   const random = `st-${crypto.randomBytes(5).toString('hex')}.${SELFTEST_DOMAIN}`;
   const port = localPort(app);
 
   add('protection', 'Protection', active ? { status: 'ok', detail: 'Protection is switched on.' }
+    : app.onExcludedNetwork && app.settings.isProtectionActive() ? { status: 'warn', detail: "You chose not to filter on this network, so nothing is blocked here. Change it in Settings → Whole-PC protection.", fix: { href: '#/settings', label: 'Open Settings' } }
     : !s.protection.enabled ? { status: 'fail', detail: 'Protection is switched off, so nothing is being blocked.', fix: { action: 'resume', label: 'Turn on' } }
       : { status: 'warn', detail: 'Protection is paused, so nothing is being blocked right now.', fix: { action: 'resume', label: 'Resume' } });
 

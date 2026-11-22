@@ -172,6 +172,7 @@ views.home = async (params) => {
             ${statusRow(s.https.enabled ? 'on' : '', 'Web filtering', s.https.enabled ? 'On' : 'Off')}
             ${statusRow(broken.length ? 'paused' : 'on', 'Sites switched off', broken.length ? String(broken.length) : 'None')}
             ${st.gaming.active ? statusRow('on', 'Gaming mode', st.gaming.exe) : ''}
+            ${st.network?.excluded ? statusRow('paused', 'This network', 'Not filtered') : ''}
           </ul>
           <a class="btn small" href="#/check" style="margin-top:12px">Check my protection</a>
           ${st.dns.errors.map((e) => `<div class="err">${esc(e)}</div>`).join('')}
@@ -219,6 +220,13 @@ views.home = async (params) => {
   every(10000, () => { if (!['chk', 'fix-site'].includes(document.activeElement?.id)) render().catch(() => {}); });
 };
 
+// Regional lists for the languages this PC's browser window uses (navigator.languages follows the
+// Windows display and input languages), e.g. en-IN or hi -> IndianList.
+function regionalSuggestions(filters) {
+  const codes = (navigator.languages || [navigator.language]).map((l) => String(l).toLowerCase().split(/[-_]/));
+  return filters.filter((f) => f.langs && codes.some(([lang, region]) => f.langs.includes(lang) || (region && f.regions?.includes(region.toUpperCase()))));
+}
+
 views.filters = async () => {
   const render = async () => {
     const [{ groups, filters, engine }, settings] = await Promise.all([api('GET', '/api/filters'), api('GET', '/api/settings')]);
@@ -227,7 +235,8 @@ views.filters = async () => {
     const webNote = settings.https.enabled ? '' : 'Web filtering is off: these lists apply once you enable it on the Web filtering page.';
     const gateNote = { security: settings.security.enabled ? '' : 'Browsing security is off in Settings: these lists are inactive.',
       parental: settings.parental.enabled ? '' : 'Parental control is off in Settings: these lists are inactive.',
-      webads: webNote, webprivacy: webNote, webannoyances: webNote };
+      webads: webNote, webprivacy: webNote, webannoyances: webNote, webregional: webNote };
+    const suggest = settings.ui.regionalDismissed ? [] : regionalSuggestions(filters).filter((f) => !f.enabled);
     view.innerHTML = `
       <h1>Filters</h1><p class="sub">${fmt(engine.rules)} rules active. Lists update automatically every ${settings.filtering.updateIntervalHours || '—'} h.</p>
       <div class="card"><div class="row">
@@ -237,6 +246,9 @@ views.filters = async () => {
         <button id="add" class="primary">Add list</button>
         <button id="upd">Check for updates</button>
       </div></div>
+      ${suggest.length ? `<div class="card" id="regional"><h2>Lists for your languages</h2>
+        <p class="hint" style="margin-top:0">${esc(suggest.map((f) => f.name).join(', '))} ${suggest.length > 1 ? 'block' : 'blocks'} ads on sites in your language${settings.https.enabled ? '' : ', once web filtering is on'}.</p>
+        <div class="row"><button id="reg-on" class="primary">Turn on</button><button id="reg-no">No thanks</button></div></div>` : ''}
       ${Object.entries(groups).filter(([g]) => byGroup[g]).map(([g, label]) => `
         <div class="card"><h2>${esc(label)}</h2>${gateNote[g] ? `<div class="hint" style="margin-bottom:8px">${esc(gateNote[g])}</div>` : ''}
           ${byGroup[g].map((f) => `
@@ -252,6 +264,8 @@ views.filters = async () => {
             </div>`).join('')}
         </div>`).join('')}`;
     $$('input[id^="f-"]').forEach((el) => (el.onchange = () => act(() => api('PATCH', `/api/filters/${el.id.slice(2)}`, { enabled: el.checked }), 'Filter updated').then(render).then(refreshSidebar)));
+    if ($('#reg-on')) $('#reg-on').onclick = () => act(async () => { for (const f of suggest) await api('PATCH', `/api/filters/${f.id}`, { enabled: true }); }, 'Regional lists turned on').then(render);
+    if ($('#reg-no')) $('#reg-no').onclick = () => act(() => api('PATCH', '/api/settings', { ui: { regionalDismissed: true } })).then(render);
     $$('[data-del]').forEach((b) => (b.onclick = () => confirm('Remove this filter list?') && act(() => api('DELETE', `/api/filters/${b.dataset.del}`), 'Removed').then(render)));
     $('#add').onclick = async (e) => {
       e.target.disabled = true;
@@ -357,6 +371,7 @@ views.https = async () => {
         </div>`}
         <div class="card"><h2>Options</h2>
           <div class="toggle-row">${sw('h-cos', h.cosmetic)}<div class="body"><div class="name">Hide page elements</div><div class="desc">Inject cosmetic rules (element hiding) into web pages.</div></div></div>
+          <div class="toggle-row">${sw('h-ech', h.blockEch)}<div class="body"><div class="name">Turn off Encrypted Client Hello</div><div class="desc">Some browsers can hide which site they connect to, which stops web filtering there and can make sites fail to load. Recommended.</div></div></div>
           <div class="toggle-row">${sw('h-ev', h.skipEv)}<div class="body"><div class="name">Don't filter sites with EV certificates</div><div class="desc">Banks and payment sites often use Extended Validation certificates.</div></div></div>
           <div class="toggle-row">${sw('h-auto', h.autoExclude)}<div class="body"><div class="name">Auto-exclude apps that reject the certificate</div><div class="desc">Apps with certificate pinning keep working: their hosts are passed through for an hour.</div></div></div>
           <label class="field" style="margin-top:10px"><span>Never decrypt these domains (one per line)</span><textarea id="h-ex" rows="5">${esc(h.exclusions.map((d) => d.name ?? d).join('\n'))}</textarea></label>
@@ -407,7 +422,7 @@ views.https = async () => {
       act(() => api('PATCH', '/api/settings', { https: { enabled: e.target.checked } }), e.target.checked ? 'Web filtering enabled' : 'Web filtering disabled').then(() => setTimeout(render, 1500));
     };
     $('#h-save').onclick = () => act(() => api('PATCH', '/api/settings', { https: {
-      cosmetic: $('#h-cos').checked, skipEv: $('#h-ev').checked, autoExclude: $('#h-auto').checked,
+      cosmetic: $('#h-cos').checked, skipEv: $('#h-ev').checked, blockEch: $('#h-ech').checked, autoExclude: $('#h-auto').checked,
       exclusions: $('#h-ex').value.split(/\r?\n/).map((x) => x.trim().toLowerCase()).filter(Boolean),
       port: Number($('#h-port').value), controlPort: Number($('#h-cport').value),
     } }), 'Saved').then(() => setTimeout(render, 1000));
@@ -839,6 +854,9 @@ views.settings = async () => {
         <div id="mdns-state" class="hint" style="margin-top:4px"></div>
         <div class="toggle-row">${sw('sdns', s.system.stopSecureDns)}<div class="body"><div class="name">Stop browsers skipping AdHush</div>
           <div class="desc">Browsers with "Secure DNS" can bypass ad blocking. This turns it off in Chrome, Edge, Brave and Firefox while whole-PC protection is on. Your browser may show "managed by your organization": that's this setting, and it's removed if you turn this off or uninstall.</div></div></div>
+        <h3 style="margin:18px 0 4px;font-size:14px">Networks where AdHush doesn't filter</h3>
+        <p class="hint" style="margin:0">For example work or school Wi-Fi that needs its own DNS. DNS filtering is off while you're connected to them. In-page blocking in your browsers keeps working.</p>
+        <div id="nets" class="hint" style="margin-top:8px">…</div>
       </div>
       <div class="card"><h2>Gaming mode</h2>
         <div class="toggle-row">${sw('game', s.gaming.enabled)}<div class="body"><div class="name">Don't interrupt full-screen games</div>
@@ -937,6 +955,17 @@ views.settings = async () => {
     e.target.checked ? 'Whole-PC protection on: applying within 15 seconds' : 'Whole-PC protection off: restoring normal DNS')
     .then(() => setTimeout(() => api('GET', '/api/status').then((st) => renderDnsState($('#mdns-state'), st.systemDns)).catch(() => {}), 16000));
   $('#sdns').onchange = (e) => act(() => api('PATCH', '/api/settings', { system: { stopSecureDns: e.target.checked } }), 'Saved');
+  const renderNets = async () => {
+    const n = await api('GET', '/api/networks');
+    const has = (name) => n.excluded.some((x) => x.toLowerCase() === name.toLowerCase());
+    const save = (list) => act(() => api('PATCH', '/api/settings', { system: { excludedNetworks: list } }), 'Saved').then(renderNets);
+    $('#nets').innerHTML = `
+      ${n.excluded.length ? `<ul class="list">${n.excluded.map((x, i) => `<li><span class="name">${esc(x)}</span><button class="small" data-net-rm="${i}">Filter again</button></li>`).join('')}</ul>` : '<div>None. AdHush filters on every network.</div>'}
+      ${n.current.filter((x) => !has(x)).map((x) => `<div class="row" style="margin-top:8px"><span>Connected to <strong>${esc(x)}</strong></span><button class="small" data-net-add="${esc(x)}">Don't filter here</button></div>`).join('')}`;
+    $$('[data-net-rm]').forEach((b) => (b.onclick = () => save(n.excluded.filter((_, i) => i !== Number(b.dataset.netRm)))));
+    $$('[data-net-add]').forEach((b) => (b.onclick = () => save([...n.excluded, b.dataset.netAdd])));
+  };
+  renderNets().catch(() => { $('#nets').textContent = "Couldn't read this PC's networks."; });
   $('#bgcheck').onchange = (e) => act(() => api('PATCH', '/api/settings', { system: { backgroundCheck: e.target.checked } }), 'Saved');
   $('#game').onchange = (e) => act(() => api('PATCH', '/api/settings', { gaming: { enabled: e.target.checked } }), 'Saved');
   $$('[data-forget]').forEach((b) => (b.onclick = () => act(() => api('POST', '/api/gaming/forget', { exe: b.dataset.forget }), 'It will be filtered again').then(() => route())));
@@ -1216,7 +1245,8 @@ views.welcome = async () => {
   };
   const apply = () => act(async () => {
     const { filters } = await api('GET', '/api/filters');
-    const want = (f) => (f.group === 'ads' && f.id === 1 ? choice.ads : ANNOYANCE_FILTERS.includes(f.id) ? choice.annoyances : null);
+    const regional = new Set(regionalSuggestions(filters).map((f) => f.id));
+    const want = (f) => (f.group === 'ads' && f.id === 1 ? choice.ads : ANNOYANCE_FILTERS.includes(f.id) ? choice.annoyances : regional.has(f.id) && choice.web && choice.ads ? true : null);
     for (const f of filters) {
       const on = want(f);
       if (on !== null && f.enabled !== on) await api('PATCH', `/api/filters/${f.id}`, { enabled: on });
